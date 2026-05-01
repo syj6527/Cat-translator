@@ -211,3 +211,88 @@ export function setTextareaValue(el, value) {
     if (nativeSetter) nativeSetter.call(el, value); else el.value = value;
     $(el).val(value); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
 }
+
+// 🚨 캐릭터별 말투 패턴 분석 (정규식 기반, 비용 0)
+export function analyzeSpeechPatterns(contextMessages) {
+    if (!contextMessages || contextMessages.length === 0) return null;
+    
+    const speakerData = {};
+    contextMessages.forEach(msg => {
+        const speaker = msg.speaker || msg.name || 'Unknown';
+        const text = msg.text || msg.mes || '';
+        if (!text) return;
+        
+        if (!speakerData[speaker]) {
+            speakerData[speaker] = { texts: [], totalLen: 0, hasKorean: 0, hasEnglish: 0, profanityCount: 0,
+                shortSentences: 0, longSentences: 0, banmal: 0, jondaetmal: 0,
+                scottishMarkers: 0, irishMarkers: 0, britishMarkers: 0, texanMarkers: 0 };
+        }
+        const d = speakerData[speaker];
+        d.texts.push(text);
+        d.totalLen += text.length;
+        
+        // 언어 감지
+        if (/[가-힣]/.test(text)) d.hasKorean++;
+        if (/[a-zA-Z]{3,}/.test(text)) d.hasEnglish++;
+        
+        // 욕설 감지 (한/영)
+        if (/씨발|좆|개새끼|병신|fuck|shit|bitch|bastard|damn/gi.test(text)) d.profanityCount++;
+        
+        // 문장 길이 (대화만)
+        const dialogues = text.match(/"[^"]+"/g) || [];
+        dialogues.forEach(d_text => {
+            const wordCount = d_text.split(/\s+/).length;
+            if (wordCount < 8) speakerData[speaker].shortSentences++;
+            else if (wordCount > 20) speakerData[speaker].longSentences++;
+        });
+        
+        // 한국어 어미 (반말/존댓말)
+        const banmalEndings = (text.match(/[다아야지네군요]\.|[다아야지네군]\.|~다\b|~야\b|~어\b/g) || []).length;
+        const jondaetmalEndings = (text.match(/요\.|습니다|입니다|시오|십시오|세요/g) || []).length;
+        d.banmal += banmalEndings;
+        d.jondaetmal += jondaetmalEndings;
+        
+        // 영어 사투리 마커
+        if (/\b(aye|lass|laddie|wee|bonnie|bairn|cannae|dinnae|wouldnae)\b/gi.test(text)) d.scottishMarkers++;
+        if (/\b(begorrah|wee|grand|craic|after.*ing|tis|sure and)\b/gi.test(text)) d.irishMarkers++;
+        if (/\b(bloody|bloke|blimey|innit|cheers mate|brilliant|reckon)\b/gi.test(text)) d.britishMarkers++;
+        if (/\b(y'all|reckon|fixin'|ain't|howdy|partner|yonder)\b/gi.test(text)) d.texanMarkers++;
+    });
+    
+    // 패턴 요약 생성
+    const patterns = [];
+    Object.entries(speakerData).forEach(([speaker, d]) => {
+        if (d.texts.length === 0) return;
+        const traits = [];
+        const avgLen = d.totalLen / d.texts.length;
+        
+        // 언어
+        if (d.hasKorean > 0 && d.hasEnglish > 0) traits.push('mixed Korean/English');
+        else if (d.hasKorean > d.hasEnglish) traits.push('primarily Korean');
+        else traits.push('primarily English');
+        
+        // 사투리 마커
+        if (d.scottishMarkers > 0) traits.push('Scottish dialect markers (aye/lass/wee)');
+        if (d.irishMarkers > 0) traits.push('Irish dialect markers');
+        if (d.britishMarkers > 0) traits.push('British slang (bloody/bloke)');
+        if (d.texanMarkers > 0) traits.push('Texan/Southern markers');
+        
+        // 문장 스타일
+        if (d.shortSentences > d.longSentences * 2) traits.push('terse/short sentences');
+        else if (d.longSentences > d.shortSentences * 2) traits.push('elaborate/long sentences');
+        
+        // 욕설
+        if (d.profanityCount > 0) traits.push(`uses profanity (${d.profanityCount}x)`);
+        
+        // 한국어 어미
+        if (d.hasKorean > 0) {
+            if (d.banmal > d.jondaetmal * 2) traits.push('Korean: 반말 (informal)');
+            else if (d.jondaetmal > d.banmal * 2) traits.push('Korean: 존댓말 (formal)');
+            else if (d.banmal > 0 || d.jondaetmal > 0) traits.push('Korean: mixed formality');
+        }
+        
+        if (traits.length > 0) patterns.push(`- ${speaker}: ${traits.join(', ')}`);
+    });
+    
+    return patterns.length > 0 ? patterns.join('\n') : null;
+}

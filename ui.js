@@ -74,6 +74,14 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                 <div class="cat-setting-row" style="flex:1;"><label>토큰</label><input type="number" id="ct-max-tokens" class="text_pole" value="${settings.maxTokens || ''}" min="256" max="20000" step="256" placeholder="권장 8192"></div>
                 <div class="cat-setting-row" style="width:100px;"><label>문맥 범위</label><input type="number" id="ct-context-range" class="text_pole" value="${settings.contextRange || ''}" min="0" max="6" step="1" placeholder="최대 6"></div>
             </div>
+            <div class="cat-setting-row">
+                <label>재번역 강도 <span style="font-size:0.8em; opacity:0.6;">(이전 번역과 얼마나 다르게)</span></label>
+                <select id="ct-retranslate-strength" class="text_pole">
+                    <option value="soft" ${(settings.retranslateStrength === 'soft') ? 'selected' : ''}>약함 (살짝만 변형, 품질 유지)</option>
+                    <option value="normal" ${(settings.retranslateStrength === 'normal' || !settings.retranslateStrength) ? 'selected' : ''}>보통 (다른 표현 시도)</option>
+                    <option value="strong" ${(settings.retranslateStrength === 'strong') ? 'selected' : ''}>강함 (완전히 다르게 강제)</option>
+                </select>
+            </div>
             <div class="cat-setting-row" style="display:none"><label>시스템 보호막 (🔒 고정)</label><textarea id="ct-shield" class="text_pole cat-readonly-area" rows="3" readonly>${SYSTEM_SHIELD}</textarea></div>
             <div class="cat-setting-row">
                 <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px;">
@@ -128,7 +136,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     };
     
     // 모든 설정 필드에 자동 저장 연결
-    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range').on('change', autoSave);
+    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength').on('change', autoSave);
     $('#ct-key, #ct-model-custom, #ct-user-prompt, #ct-dictionary').on('input', autoSave);
     
     $('#ct-model').val(settings.directModel).on('change', function () {
@@ -296,7 +304,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
         $('#ct-model').val('gemini-2.5-flash'); $('#ct-model-custom').val('').hide();
-        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal');
+        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal');
         $('#ct-temperature').val(0.3); $('#ct-max-tokens').val(8192); $('#ct-context-range').val(1);
         $('#ct-user-prompt').val(''); $('#ct-dictionary').val(''); $('#ct-dict-reset').text('📭');
         settings.promptPresets = {}; settings.charPresetMap = {}; $('#ct-prompt-preset').val('').find('option:not(:first)').remove();
@@ -331,6 +339,7 @@ export function collectSettings() {
         temperature: parseFloat($('#ct-temperature').val()) || 0.3, maxTokens: parseInt($('#ct-max-tokens').val()) || 8192,
         contextRange: Math.min(6, Math.max(0, parseInt($('#ct-context-range').val()) || 1)),
         userPrompt: $('#ct-user-prompt').val() || '', dictionary: $('#ct-dictionary').val() || '',
+        retranslateStrength: $('#ct-retranslate-strength').val() || 'normal',
         promptPresets: _settingsRef?.promptPresets || {}, charPresetMap: _settingsRef?.charPresetMap || {}
     };
 }

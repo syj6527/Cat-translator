@@ -2,7 +2,7 @@
 // 🐱 Translator v1.0.4 - translator.js
 // ============================================================
 import { secret_state, SECRET_KEYS } from '../../../../scripts/secrets.js';
-import { cleanResult, catNotify, detectLanguageDirection, getThemeEmoji, getCompletionEmoji, getCacheModelKey, applyPreReplaceWithCount } from './utils.js';
+import { cleanResult, catNotify, detectLanguageDirection, getThemeEmoji, getCompletionEmoji, getCacheModelKey, applyPreReplaceWithCount, analyzeSpeechPatterns } from './utils.js';
 import { getCached, setCached } from './cache.js';
 
 export const SYSTEM_SHIELD = `[ABSOLUTE DIRECTIVE - VIOLATION = FAILURE]
@@ -50,6 +50,31 @@ KEEP these trigger patterns EXACTLY as-is — do NOT translate the structural ke
 - Bracket patterns like [Status], [Info], [Scene]: keep the keyword in English
 - Special brackets 『...』, 【...】: keep the bracket style, translate content inside
 - Any pattern that looks like a UI/system tag: preserve it unchanged
+
+[DIALECT HANDLING - STRICT]
+Foreign accents/dialects (Scottish, Irish, Texan, Cockney, Australian, etc.) MUST NOT be mapped to Korean regional dialects (경상도, 전라도, 충청도, 강원도, 제주도, etc.).
+This mapping ALWAYS produces unnatural and offensive results.
+
+Instead, use these techniques to convey foreign dialect character:
+1. Word choice variation — slightly archaic, slangy, or rural-sounding STANDARD Korean
+2. Sentence rhythm — clipped or drawn-out standard Korean
+3. Keep iconic dialect markers in original (e.g., "aye", "lass", "mate", "y'all", "wee")
+4. For full Korean translation, use neutral standard Korean tone
+
+WRONG: "Aye, lassie" → "아이고마, 가시나" (Korean dialect)
+WRONG: "Y'all coming?" → "다들 갈끄여?" (Korean dialect)
+RIGHT: "Aye, lassie" → "그래, 아가씨" or "Aye, 아가씨"
+RIGHT: "Y'all coming?" → "다들 가는 거지?"
+
+[CHARACTER VOICE LOCK - HIGHEST PRIORITY]
+When context messages are provided, you MUST preserve each character's established voice:
+1. FORMALITY LOCK: If a character spoke in 반말 before, KEEP IT 반말. If 존댓말, KEEP IT 존댓말. NEVER mid-flip.
+2. PROFANITY LEVEL: Match exact intensity. If they said "씨발", don't soften to "젠장". If they said "fuck", don't soften.
+3. SENTENCE STYLE: Terse characters stay terse. Elaborate characters stay elaborate. Don't normalize.
+4. CULTURAL MARKERS: Preserve dialect markers, age markers, character-specific phrases.
+5. EMOTIONAL DEFAULT: Cold characters stay cold. Warm characters stay warm. Don't homogenize.
+
+If you detect inconsistency in source between character's previous voice and current message, TRUST the established voice from context.
 
 Output ONLY the final translated text.`;
 
@@ -152,7 +177,10 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
         if (!silent) catNotify(`🐾 사전 ${dictMatchCount}개 단어 치환 적용!`, "success");
     }
 
-    const prompt = assemblePrompt(preSwapped, targetLang, isToEnglish, settings, { prevTranslation, contextMessages });
+    // 🚨 캐릭터 카드 힌트 추출 (RP 톤 일관성)
+    const characterHints = gatherCharacterHints(stContext);
+    
+    const prompt = assemblePrompt(preSwapped, targetLang, isToEnglish, settings, { prevTranslation, contextMessages, characterHints });
 
     try {
         let result = ""; let thought = null;
@@ -247,7 +275,7 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
 }
 
 function assemblePrompt(text, targetLang, isToEnglish, settings, options = {}) {
-    const { prevTranslation, contextMessages = [] } = options;
+    const { prevTranslation, contextMessages = [], characterHints = null } = options;
     const bilingualMode = settings.dialogueBilingual || 'off';
     
     // 🚨 병기 모드 ON이면 짧은 텍스트도 풀 프롬프트 경로 강제 사용
@@ -319,8 +347,37 @@ Output: ${bl.exNarTgt} "${bl.exSrc} [${bl.exTgt}]" ${bl.exNarTgt}. "${bl.exSrc} 
         }
     }
 
-    if (prevTranslation) { parts.push(`[MANDATORY: Your translation MUST be COMPLETELY DIFFERENT from this: "${prevTranslation.substring(0, 200)}"]`); parts.push(`[Use different vocabulary, sentence structure, and tone. Do NOT produce a similar result.]`); }
-    if (contextMessages.length > 0) { parts.push('\n[Context - Previous messages for reference. Match each character\'s speech style consistently. Do NOT translate these:]'); contextMessages.forEach((msg, i) => { const offset = contextMessages.length - i; const speaker = typeof msg === 'object' ? msg.speaker : 'Unknown'; const text = typeof msg === 'object' ? msg.text : msg; parts.push(`[${speaker}] Message -${offset}: "${text}"`); }); }
+    if (prevTranslation) {
+        const strength = settings.retranslateStrength || 'normal';
+        if (strength === 'soft') {
+            parts.push(`[Try a slightly different phrasing from this previous attempt: "${prevTranslation.substring(0, 200)}"]`);
+            parts.push(`[Use different word choices while keeping the overall tone. Maintain quality - don't sacrifice naturalness for difference.]`);
+        } else if (strength === 'strong') {
+            parts.push(`[MANDATORY: Your translation MUST be COMPLETELY DIFFERENT from this: "${prevTranslation.substring(0, 200)}"]`);
+            parts.push(`[Use different vocabulary, sentence structure, and tone. Do NOT produce a similar result.]`);
+        } else {
+            parts.push(`[Provide a different translation from this previous attempt: "${prevTranslation.substring(0, 200)}"]`);
+            parts.push(`[Use different vocabulary and sentence structure while preserving meaning and tone.]`);
+        }
+    }
+    
+    // 🚨 말투 패턴 분석 결과 주입 (정규식 기반)
+    if (contextMessages.length > 0) {
+        const speechPatterns = analyzeSpeechPatterns(contextMessages);
+        if (speechPatterns) {
+            parts.push(`\n[Speech Patterns Detected - LOCK each character's voice to these patterns]\n${speechPatterns}`);
+        }
+    }
+    
+    // 🚨 캐릭터 카드 힌트 주입 (RP 배경/성격 컨텍스트)
+    if (characterHints) {
+        parts.push(`\n[Character Background - Use as reference for tone/setting consistency. Do NOT translate this:]\n${characterHints}`);
+    }
+    
+    if (contextMessages.length > 0) {
+        parts.push('\n[Context - Previous messages for reference. Match each character\'s speech style consistently. Do NOT translate these:]');
+        contextMessages.forEach((msg, i) => { const offset = contextMessages.length - i; const speaker = typeof msg === 'object' ? msg.speaker : 'Unknown'; const text = typeof msg === 'object' ? msg.text : msg; parts.push(`[${speaker}] Message -${offset}: "${text}"`); });
+    }
     parts.push(`\n[Translate this message:]\n${text}`);
     return parts.join('\n');
 }
@@ -371,4 +428,27 @@ export function gatherContextMessages(msgId, stContext, range = 1) {
             }
         }
     } return messages;
+}
+
+// 🚨 캐릭터 카드에서 톤/배경 힌트 추출 (gatherContextMessages 보조)
+export function gatherCharacterHints(stContext) {
+    try {
+        const characters = stContext.characters || [];
+        const characterId = stContext.characterId;
+        if (characterId === undefined || !characters[characterId]) return null;
+        
+        const char = characters[characterId];
+        const description = (char.description || '').substring(0, 800);
+        const personality = (char.personality || '').substring(0, 400);
+        const scenario = (char.scenario || '').substring(0, 400);
+        
+        if (!description && !personality && !scenario) return null;
+        
+        const hints = [];
+        if (description) hints.push(`Description: ${description}`);
+        if (personality) hints.push(`Personality: ${personality}`);
+        if (scenario) hints.push(`Scenario: ${scenario}`);
+        
+        return hints.join('\n');
+    } catch (e) { return null; }
 }

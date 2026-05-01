@@ -10,7 +10,7 @@ import { setupSettingsPanel, collectSettings, updateCacheStats, injectMessageBut
 const EXT_NAME = "cat-translator";
 const stContext = getContext();
 
-const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', promptPresets: {}, charPresetMap: {} };
+const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', promptPresets: {}, charPresetMap: {} };
 // 베타 → 정식 설정 마이그레이션 (기존 사용자 설정 보존)
 if (!extension_settings[EXT_NAME] && extension_settings["cat-translator-beta"]) {
     extension_settings[EXT_NAME] = { ...extension_settings["cat-translator-beta"] };
@@ -73,16 +73,36 @@ async function processMessage(id, isInput = false, abortSignal = null, silent = 
     
     const mesBlock = $(`.mes[mesid="${msgId}"]`);
 
-    // 🚨 스와이프 감지: 자동 번역 가드보다 먼저 실행해야 stale display_text를 삭제함
+    // 🚨 스와이프 감지: 이전 번역을 swipe_translations에 보존 후 현재 swipe 데이터로 전환
     if (msg.extra?.original_mes && msg.extra?.cat_swipe_id !== undefined &&
         msg.swipe_id !== undefined && msg.swipe_id !== msg.extra.cat_swipe_id) {
-        // 스와이프 변경 → stale 데이터 전부 삭제
-        delete msg.extra.original_mes;
-        delete msg.extra.display_text;
-        delete msg.extra.cat_swipe_id;
-        mesBlock.removeAttr('data-cat-translated');
-        stContext.updateMessageBlock(msgId, msg);
-        console.log(`[CAT] 🔄 스와이프 감지 #${msgId}: 번역 캐시 초기화`);
+        const prevSwipeId = msg.extra.cat_swipe_id;
+        // 이전 swipe의 번역을 보존
+        if (!msg.extra.swipe_translations) msg.extra.swipe_translations = {};
+        msg.extra.swipe_translations[prevSwipeId] = {
+            original_mes: msg.extra.original_mes,
+            display_text: msg.extra.display_text
+        };
+        console.log(`[CAT] 💾 스와이프 #${prevSwipeId} 번역 보존 #${msgId}`);
+        
+        // 현재 swipe에 저장된 번역이 있으면 복원
+        const currentSwipeData = msg.extra.swipe_translations[msg.swipe_id];
+        if (currentSwipeData?.original_mes && currentSwipeData?.display_text) {
+            msg.extra.original_mes = currentSwipeData.original_mes;
+            msg.extra.display_text = currentSwipeData.display_text;
+            msg.extra.cat_swipe_id = msg.swipe_id;
+            console.log(`[CAT] 🔄 스와이프 #${msg.swipe_id} 저장된 번역 복원 #${msgId}`);
+            stContext.updateMessageBlock(msgId, msg);
+            mesBlock.attr('data-cat-translated', 'true');
+        } else {
+            // 현재 swipe 첫 방문 → 번역 데이터 초기화 (다시 번역 가능 상태)
+            delete msg.extra.original_mes;
+            delete msg.extra.display_text;
+            delete msg.extra.cat_swipe_id;
+            mesBlock.removeAttr('data-cat-translated');
+            stContext.updateMessageBlock(msgId, msg);
+            console.log(`[CAT] 🆕 스와이프 #${msg.swipe_id} 첫 방문 → 새 번역 대기`);
+        }
     }
 
     if (isAutoEvent && mesBlock.attr('data-cat-translated') === 'true') return;
@@ -97,14 +117,29 @@ async function processMessage(id, isInput = false, abortSignal = null, silent = 
         console.log(`[CAT] 🔧 Legacy 메시지 #${msgId} 자동 복원: msg.mes → 원문`);
     }
 
-    const startGlow = () => mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon').addClass('cat-glow-anim');
-    const stopGlow = () => mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon').removeClass('cat-glow-anim');
+    const startGlow = () => {
+        mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon').addClass('cat-glow-anim').attr('data-cat-glow-start', Date.now());
+    };
+    const stopGlow = () => mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon').removeClass('cat-glow-anim').removeAttr('data-cat-glow-start');
 
     const isAutoMode = (settings.autoMode !== 'none');
     const isAutoTriggered = isAutoMode && !abortSignal;
 
-    if (mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon.cat-glow-anim').length > 0) return;
+    // 🚨 글로우 stuck 자동 감지 및 복구: 60초 이상 stuck이면 강제 해제 후 진행
+    const stuckGlow = mesBlock.find('.cat-mes-trans-btn .cat-emoji-icon.cat-glow-anim');
+    if (stuckGlow.length > 0) {
+        const startTime = parseInt(stuckGlow.attr('data-cat-glow-start') || '0');
+        const elapsed = Date.now() - startTime;
+        if (startTime > 0 && elapsed > 60000) {
+            console.warn(`[CAT] 🔧 글로우 stuck 감지 (${Math.round(elapsed/1000)}s) → 강제 해제 후 재시도 #${msgId}`);
+            stopGlow();
+        } else {
+            return;
+        }
+    }
     startGlow();
+    // 🚨 글로우 안전장치: 60초 후 자동 해제 (에러로 stuck 방지)
+    const glowTimeout = setTimeout(() => { stopGlow(); console.warn(`[CAT] ⚠️ 글로우 타임아웃 #${msgId}`); }, 60000);
     let historyShown = false;
 
     try {
@@ -149,7 +184,7 @@ async function processMessage(id, isInput = false, abortSignal = null, silent = 
             if (shown) { historyShown = true; return; }
         }
         await doTranslateMessage(msgId, msg, textToTranslate, isInput, existingTranslation, abortSignal, silent);
-    } finally { if (!historyShown) stopGlow(); }
+    } finally { clearTimeout(glowTimeout); if (!historyShown) stopGlow(); }
 }
 
 async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTranslation, abortSignal, silent = false) {
@@ -165,7 +200,15 @@ async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTran
         if (!msg.extra) msg.extra = {};
         if (!msg.extra.original_mes) msg.extra.original_mes = textToTranslate;
         msg.extra.display_text = result.text;
-        if (msg.swipe_id !== undefined) msg.extra.cat_swipe_id = msg.swipe_id;
+        if (msg.swipe_id !== undefined) {
+            msg.extra.cat_swipe_id = msg.swipe_id;
+            // 🚨 스와이프별 번역 보존 — 다른 스와이프로 전환했다 돌아와도 유지됨
+            if (!msg.extra.swipe_translations) msg.extra.swipe_translations = {};
+            msg.extra.swipe_translations[msg.swipe_id] = {
+                original_mes: textToTranslate,
+                display_text: result.text
+            };
+        }
         // 🚨 입력 메시지: msg.mes = 번역문(영어) → AI 컨텍스트에 영어 전달
         // 🚨 출력 메시지: msg.mes = 원문 유지 → 컨텍스트 오염 방지
         if (isInput) { msg.mes = result.text; }
@@ -362,6 +405,20 @@ jQuery(async () => {
     });
     console.log('[CAT] 🐱 Translator v1.0.4 로드 완료!');
     
+    // 🚨 페이지 가시성 변경 시 60초 이상 stuck 글로우 정리 (모바일 백그라운드 복귀 대응)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            $('.cat-mes-trans-btn .cat-emoji-icon.cat-glow-anim, #cat-input-btn .cat-emoji-icon.cat-glow-anim').each(function () {
+                const startTime = parseInt($(this).attr('data-cat-glow-start') || '0');
+                const elapsed = Date.now() - startTime;
+                if (startTime > 0 && elapsed > 60000) {
+                    $(this).removeClass('cat-glow-anim').removeAttr('data-cat-glow-start');
+                    console.warn(`[CAT] 🔧 visibility 복귀 → stuck 글로우 정리 (${Math.round(elapsed/1000)}s)`);
+                }
+            });
+        }
+    });
+    
     // 🚨 원문 오염 방어: msg.mes에 한국어가 들어가면 자동 복구
     // ST 내부 렌더링/저장 과정에서 display_text가 msg.mes로 역류하는 현상 방지
     function repairContamination(source = '') {
@@ -388,9 +445,36 @@ jQuery(async () => {
         }
     }
     
+    // 🚨 스와이프별 번역 자동 복원: 채팅 진입 시 각 메시지의 현재 swipe에 맞는 번역 복원
+    function restoreSwipeTranslations(source = '') {
+        const ctx = SillyTavern?.getContext?.();
+        if (!ctx?.chat) return;
+        let restored = 0;
+        ctx.chat.forEach((msg, i) => {
+            if (msg.is_user) return;
+            if (!msg.extra?.swipe_translations) return;
+            if (msg.swipe_id === undefined) return;
+            
+            const currentSwipeData = msg.extra.swipe_translations[msg.swipe_id];
+            if (!currentSwipeData?.display_text) return;
+            
+            // 현재 표시되는 번역이 이번 swipe와 다르면 복원
+            if (msg.extra.cat_swipe_id !== msg.swipe_id || msg.extra.display_text !== currentSwipeData.display_text) {
+                msg.extra.original_mes = currentSwipeData.original_mes;
+                msg.extra.display_text = currentSwipeData.display_text;
+                msg.extra.cat_swipe_id = msg.swipe_id;
+                restored++;
+            }
+        });
+        if (restored > 0) {
+            console.log(`[CAT] 🔄 swipe 번역 복원: ${restored}개 (${source})`);
+            try { ctx.saveChat(); } catch (e) {}
+        }
+    }
+    
     // 채팅 진입 시 즉시 복구
     stContext.eventSource.on(stContext.event_types.CHAT_CHANGED, () => {
-        setTimeout(() => repairContamination('CHAT_CHANGED'), 300);
+        setTimeout(() => { repairContamination('CHAT_CHANGED'); restoreSwipeTranslations('CHAT_CHANGED'); }, 300);
     });
     
     // 메시지 렌더 시 복구 (AI 응답 생성 전에 오염 제거)
@@ -402,6 +486,6 @@ jQuery(async () => {
     setInterval(() => repairContamination('watchdog'), 5000);
     
     // 최초 로드 시 복구
-    setTimeout(() => repairContamination('init'), 1500);
+    setTimeout(() => { repairContamination('init'); restoreSwipeTranslations('init'); }, 1500);
 });
 
