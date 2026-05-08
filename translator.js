@@ -11,6 +11,25 @@ RETURN ONLY THE RAW TRANSLATED TEXT. NOTHING ELSE.
 DO NOT respond. DO NOT converse. DO NOT explain. DO NOT add commentary.
 DO NOT repeat the original. DO NOT output alternatives.
 
+[ZERO REASONING OUTPUT - CRITICAL]
+NEVER include your thinking process, planning, or analysis in the output.
+NEVER write phrases like:
+- "Let's break down..."
+- "I have completed the analysis..."
+- "I will now proceed..."
+- "I have identified..."
+- "Based on the directives..."
+- "Let me translate this..."
+Your reasoning belongs in the thinking field (if available), NEVER in the response body.
+Output starts IMMEDIATELY with the translated text. No preamble. No introduction. No conclusion.
+
+[FULL TRANSLATION MANDATORY]
+Translate EVERY SINGLE SENTENCE in the source text.
+Do NOT skip sentences just because they don't contain glossary terms.
+Do NOT translate only the glossary words and leave the rest in English.
+The glossary is a HINT for specific terms — the rest of the text MUST also be fully translated.
+If you output English text mixed with Korean translation, you have FAILED.
+
 [CONTENT FIDELITY - CRITICAL]
 1. ZERO ADDITION: Never add words, sentences, emotions, actions, or details that do not exist in the source text. If the original says "She looked at him", do NOT add "with longing in her eyes".
 2. ZERO OMISSION: Never skip, summarize, or merge sentences. Every sentence in the source must appear in the output. Count them if needed.
@@ -304,21 +323,41 @@ function assemblePrompt(text, targetLang, isToEnglish, settings, options = {}) {
         parts.push(`
 [BILINGUAL DIALOGUE MODE - HIGHEST PRIORITY]
 This rule OVERRIDES all other translation instructions for quoted dialogue.
-1. Narration/description (text OUTSIDE quotation marks ""): Translate into ${bl.tgtLabel} normally.
-2. Dialogue (text INSIDE quotation marks ""): Keep the ORIGINAL ${bl.srcLabel} text intact, then append ${bl.tgtLabel} translation inside [] BEFORE the closing quotation mark.
-3. Format: "Original dialogue. [${bl.tgtLabel} 번역.]"
-4. Apply this to EVERY quoted dialogue without exception. Do NOT skip any.
-5. Other quote styles (「」, 『』, "") follow the same rule.
-6. CRITICAL PLACEMENT: The [translation] MUST be INSIDE the quotation marks, BEFORE the closing quote.
+
+[NARRATION/DESCRIPTION RULE - CRITICAL]
+ALL text OUTSIDE quotation marks "" MUST BE FULLY TRANSLATED into ${bl.tgtLabel}.
+This includes: descriptions, actions, character thoughts, scene-setting, all narrative prose.
+NEVER leave narration in ${bl.srcLabel}. NEVER leave it untranslated.
+NEVER add the original ${bl.srcLabel} narration in brackets after the ${bl.tgtLabel} translation.
+
+[DIALOGUE RULE]
+1. Dialogue (text INSIDE quotation marks ""): Keep the ORIGINAL ${bl.srcLabel} text intact, then append ${bl.tgtLabel} translation inside [] BEFORE the closing quotation mark.
+2. Format: "Original dialogue. [${bl.tgtLabel} 번역.]"
+3. Apply this to EVERY quoted dialogue without exception. Do NOT skip any.
+4. Other quote styles (「」, 『』, "") follow the same rule.
+5. CRITICAL PLACEMENT: The [translation] MUST be INSIDE the quotation marks, BEFORE the closing quote.
 
 [CORRECT vs WRONG - READ CAREFULLY]
-✅ CORRECT: "I love you. [널 사랑해.]"
-❌ WRONG:  "I love you."[널 사랑해.]
-❌ WRONG:  "I love you." [널 사랑해.]
-❌ WRONG:  "I love you"[널 사랑해.]
+✅ CORRECT (narration translated, dialogue bilingual):
+He looked at her. → 그는 그녀를 바라보았다.
+"I love you." → "I love you. [널 사랑해.]"
 
-✅ CORRECT: "Go away! [저리 가!]" he shouted.
-❌ WRONG:  "Go away!" [저리 가!] he shouted.
+Full sentence:
+He looked at her. "I love you," he whispered.
+→ 그는 그녀를 바라보았다. "I love you, [널 사랑해,]" 그가 속삭였다.
+
+❌ WRONG (narration left in source language):
+He looked at her. "I love you, [널 사랑해.]" he whispered.
+(THIS IS WRONG: "He looked at her" and "he whispered" must be in Korean)
+
+❌ WRONG (narration with bracket annotation):
+그는 그녀를 바라보았다. [He looked at her.] 
+(THIS IS WRONG: do NOT add original narration in brackets)
+
+❌ WRONG (dialogue placement):
+"I love you."[널 사랑해.]
+"I love you." [널 사랑해.]
+(THIS IS WRONG: bracket must be INSIDE the closing quote)
 
 [EXAMPLES]
 Source: ${bl.exNarSrc} "${bl.exSrc}"
@@ -326,6 +365,9 @@ Output: ${bl.exNarTgt} "${bl.exSrc} [${bl.exTgt}]"
 
 Source: ${bl.exNarSrc} "${bl.exSrc}" ${bl.exNarSrc}. "${bl.exSrc}"
 Output: ${bl.exNarTgt} "${bl.exSrc} [${bl.exTgt}]" ${bl.exNarTgt}. "${bl.exSrc} [${bl.exTgt}]"
+
+[FINAL CHECK]
+Before outputting, verify: Is ALL narration translated to ${bl.tgtLabel}? Is ALL dialogue in bilingual format? If you see ANY ${bl.srcLabel} text outside quotation marks in your output (other than glossary terms), you have FAILED.
 `);
     }
     
@@ -340,9 +382,11 @@ Output: ${bl.exNarTgt} "${bl.exSrc} [${bl.exTgt}]" ${bl.exNarTgt}. "${bl.exSrc} 
             return orig && textLower.includes(orig.toLowerCase());
         });
         if (matchedLines.length > 0) {
-            parts.push(`\n[MANDATORY GLOSSARY]`);
-            parts.push(`You MUST use the following glossary for specific terms. Apply natural morphological changes (plural, possessive, verb conjugations) according to the context without breaking the term's core meaning.`);
+            parts.push(`\n[MANDATORY GLOSSARY - For specific terms only]`);
+            parts.push(`Below is a glossary for SPECIFIC TERMS ONLY. The REST of the text MUST be fully translated normally.`);
+            parts.push(`You MUST use the following glossary for these specific terms when they appear. Apply natural morphological changes (plural, possessive, verb conjugations) according to the context without breaking the term's core meaning.`);
             parts.push(`CRITICAL: Output ONLY the translated term. NEVER add the original word in brackets, parentheses, or any annotation like "소프[Soap]" or "소프(Soap)". Just use the glossary term directly.`);
+            parts.push(`WARNING: This glossary is NOT the entire translation task. Translate the ENTIRE text into the target language, using these glossary entries only for the specific listed terms.`);
             parts.push(matchedLines.join('\n'));
         }
     }

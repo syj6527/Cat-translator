@@ -66,6 +66,27 @@ export function cleanResult(text, originalText = null) {
     // AI가 앞에 붙이는 "번역:" 등 접두어 제거
     let cleaned = text.replace(/^(번역|Translation|Output|Input|Result):\s*/gi, "");
     
+    // 🚨 추론/사고 과정 텍스트 자동 제거 (Gemini Pro 모델이 종종 출력)
+    // 영어 추론 단락만 정확히 제거 (한국어가 시작되는 지점까지만)
+    // 핵심 마커: "Let's break down", "I have completed", "I will now proceed" 등
+    const reasoningStartMarkers = /^(Let'?s break down|I have completed|I will now proceed|I have identified|Based on the directives|Let me translate|I do not need further|Looking at the (text|source|context)|Analyzing the (text|source|context)|First, let me|To translate this|Here is my analysis)/i;
+    
+    if (reasoningStartMarkers.test(cleaned)) {
+        // 추론 시작 → 한국어/일본어/중국어가 시작되는 첫 위치까지 잘라냄
+        const targetLangMatch = cleaned.match(/[\u3131-\uD79D\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]/);
+        if (targetLangMatch) {
+            const targetIdx = targetLangMatch.index;
+            // 추론 단락이 한국어 시작 직전까지만 차지하는지 검증
+            // (영어가 50자 이상 + 한국어 시작 → 추론 제거)
+            const beforeTarget = cleaned.substring(0, targetIdx);
+            if (beforeTarget.length > 30 && /[a-zA-Z]/.test(beforeTarget)) {
+                cleaned = cleaned.substring(targetIdx);
+                console.log('[CAT] 🧹 추론 텍스트 제거됨');
+            }
+        }
+    }
+    cleaned = cleaned.trim();
+    
     // AI가 응답 전체를 코드블록으로 감싼 경우만 벗기기
     const wholeCodeBlockMatch = cleaned.match(/^```[a-z]*\n([\s\S]*?)\n```\s*$/i);
     if (wholeCodeBlockMatch) {
