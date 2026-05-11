@@ -274,9 +274,28 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
         // 🚨 병기 후처리: "text."[번역] → "text. [번역]" 자동 교정
         const bilingualMode = settings.dialogueBilingual || 'off';
         if (bilingualMode !== 'off' && cleaned) {
+            // [SPLIT 자동 병합] "Hi. [안녕.] I'm chat. [나는 챗.]" → "Hi. I'm chat. [안녕. 나는 챗.]"
+            // 같은 따옴표 안에 여러 [번역] 블록이 있으면 통합
+            const beforeMerge = cleaned;
+            cleaned = cleaned.replace(/"([^"]*?)"/g, (match, content) => {
+                // 따옴표 안에 [한국어/일본어/중국어] 패턴이 2개 이상 있으면 병합
+                const bracketRegex = /\s*\[([^\]]*[가-힣ぁ-んァ-ヶ一-龥][^\]]*)\]\s*/g;
+                const brackets = [...content.matchAll(bracketRegex)];
+                if (brackets.length >= 2) {
+                    // 원문(영어) 부분만 추출
+                    const original = content.replace(bracketRegex, ' ').replace(/\s+/g, ' ').trim();
+                    // 번역들을 순서대로 합침
+                    const translations = brackets.map(b => b[1].trim()).join(' ');
+                    return `"${original} [${translations}]"`;
+                }
+                return match;
+            });
+            if (beforeMerge !== cleaned) {
+                console.log('[CAT] 🔗 끊긴 병기 자동 병합');
+            }
+            
             // [REVERSED 자동 교정] "한국어 [English]" → "English [한국어]" (역순으로 나온 경우)
             cleaned = cleaned.replace(/"([^"]*?[가-힣][^"]*?)\s*\[([^\]]*[a-zA-Z][^\]]*)\]([^"]*?)"/g, (match, kor, eng, rest) => {
-                // 한국어 비율이 높은 경우만 역순으로 판정 (의도된 [영어 약어] 같은 건 보호)
                 const korChars = (kor.match(/[가-힣]/g) || []).length;
                 const engChars = (eng.match(/[a-zA-Z]/g) || []).length;
                 if (korChars > 3 && engChars > 3) {
@@ -384,12 +403,28 @@ RULE B: DIALOGUE (text INSIDE quotation marks)
 For DIALOGUE ONLY (text wrapped in "" / 「」 / 『』 / ""):
 KEEP the original ${bl.srcLabel} text → ADD ${bl.tgtLabel} translation in [] → INSIDE the closing quote.
 
-CORRECT FORMAT:
-"<${bl.srcLabel} dialogue> [<${bl.tgtLabel} translation>]"
+🚨🚨🚨 ABSOLUTE RULE: ONE QUOTATION MARK PAIR = ONE TRANSLATION BLOCK 🚨🚨🚨
+A "quotation" means everything inside one pair of " ". 
+NO MATTER how many sentences are inside a single quotation, translate them ALL TOGETHER as ONE consolidated [translation] block at the END.
+NEVER split per sentence. NEVER interleave [translation] between sentences.
 
-NOT:
-"<${bl.tgtLabel} translation> [<${bl.srcLabel} dialogue>]"  ← REVERSED, WRONG!
-"<${bl.srcLabel} dialogue>"[<${bl.tgtLabel} translation>]   ← bracket OUTSIDE quote, WRONG!
+CORRECT FORMAT — Single [translation] block at the END of each quotation:
+✅ "Hi. I'm chat-si. [안녕. 나는 챗시야.]"
+✅ "Get down! There's a sniper. Move now! [엎드려! 저격수가 있어. 지금 움직여!]"
+✅ "I love you. I always have. I always will. [널 사랑해. 항상 사랑했어. 앞으로도 사랑할 거야.]"
+
+❌ ABSOLUTELY WRONG — Split per sentence (this is the most common mistake):
+❌ "Hi. [안녕.] I'm chat-si. [나는 챗시야.]"
+❌ "Get down! [엎드려!] There's a sniper. [저격수가 있어.] Move now! [지금 움직여!]"
+❌ "I love you. [널 사랑해.] I always have. [항상 사랑했어.]"
+
+WHY WRONG: Translation goes ONCE at the END of the entire quotation, not after each sentence.
+
+❌ WRONG (reversed order):
+"<${bl.tgtLabel} translation> [<${bl.srcLabel} dialogue>]"
+
+❌ WRONG (bracket outside quote):
+"<${bl.srcLabel} dialogue>"[<${bl.tgtLabel} translation>]
 
 ═══════════════════════════════════════════
 CONCRETE EXAMPLES (memorize these)
@@ -405,6 +440,21 @@ EXPLANATION:
 - "He looked at her" → narration → "그는 그녀를 바라보았다" (full Korean)
 - "I love you," → dialogue → "I love you, [널 사랑해,]" (English KEPT + Korean in brackets INSIDE quotes)
 - "he whispered" → narration → "그가 속삭였다" (full Korean)
+
+═══════════════════════════════════════════
+MULTI-SENTENCE DIALOGUE EXAMPLE (CRITICAL)
+═══════════════════════════════════════════
+
+SOURCE:
+She introduced herself with a smile. "Hi. I'm chat-si. Nice to meet you."
+
+CORRECT OUTPUT:
+그녀가 미소를 지으며 자신을 소개했다. "Hi. I'm chat-si. Nice to meet you. [안녕. 나는 챗시야. 만나서 반가워.]"
+
+❌ WRONG (split each sentence into its own bracket):
+그녀가 미소를 지으며 자신을 소개했다. "Hi. [안녕.] I'm chat-si. [나는 챗시야.] Nice to meet you. [만나서 반가워.]"
+
+KEY POINT: Multiple sentences inside ONE quotation get ONE translation block at the END.
 
 ❌ WRONG (narration in English):
 He looked at her. "I love you, [널 사랑해,]" he whispered.
@@ -426,6 +476,7 @@ Verify EACH of these:
 2. Is every dialogue in format: "<original ${bl.srcLabel}> [<${bl.tgtLabel} translation>]"? (If NO → fix it)
 3. Are translation brackets INSIDE the closing quote? (If NO → fix it)
 4. Did I keep the ORIGINAL ${bl.srcLabel} text in dialogue? (If you only wrote ${bl.tgtLabel} → REVERSED, fix)
+5. For multi-sentence quotes: Is there ONLY ONE [translation] block per quotation? (If split per sentence → MERGE into one block at the end)
 `);
     } else {
         // 🚨 병기 OFF 모드: 컨텍스트에 병기 흔적이 있어도 절대 따라하지 말 것
