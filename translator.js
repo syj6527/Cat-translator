@@ -50,7 +50,7 @@ TRANSLATE EVERY piece of human-readable text fearlessly!
 
 [FORMAT PRESERVATION]
 1. TRANSLATE THE WORDS inside all tags, blocks, and brackets. Never leave readable text untranslated.
-2. KEEP THE SYMBOLS. Preserve all HTML tags (<memo>, <div>, <small>, <pre>, <code>), code block markers (\`\`\`yaml, \`\`\`), brackets (『』, <>), and markdown (*bold*, _italic_) in their exact original positions.
+2. KEEP THE SYMBOLS. Preserve ALL HTML tags exactly as-is — including standard tags (<memo>, <div>, <small>, <pre>, <code>) AND custom tags (<info_panel>, <status_box>, <character_card>, <chat_box>, ANY tag the user uses). Never strip, modify, or omit any tag. Preserve code block markers (\`\`\`yaml, \`\`\`json, \`\`\`) including their opening and closing fences EXACTLY. Preserve brackets (『』, 【】, <>), and markdown (*bold*, _italic_) in their exact original positions.
 3. HTML COMMENTS (<!-- -->): TRANSLATE the human-readable text INSIDE comments. Keep the <!-- --> markers but translate the content between them. These often contain character profiles, status info, and story data that MUST be translated.
 4. PRESERVE spacing, indentation, and line breaks exactly. This is critical for YAML and structured blocks.
 5. PRESERVE ALL CSS properties, color codes (#fff, rgb), classes, and style attributes untouched.
@@ -315,9 +315,8 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
             cleaned = cleaned.replace(/"([^"]*?[a-zA-Z][^"]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^"]*?)"/g, '"$2$3"');
             cleaned = cleaned.replace(/「([^」]*?[a-zA-Z][^」]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^」]*?)」/g, '「$2$3」');
             cleaned = cleaned.replace(/『([^』]*?[a-zA-Z][^』]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^』]*?)』/g, '『$2$3』');
-            // 추가: 따옴표 밖 영어 묘사 + [한국어] 형태도 정리
-            // "영어 묘사. [한국어 묘사.]" 형태 (지문에 잔존하는 병기)
-            cleaned = cleaned.replace(/([a-zA-Z][a-zA-Z\s,.'!?]+)\s*\[([^\]]*[가-힣][^\]]*)\]/g, '$2');
+            // 🚨 따옴표 밖 영어 묘사 + [한국어 묘사] 정리는 너무 위험 (코드블록의 ```yaml [Time:...] 등을 망가뜨림)
+            // 따옴표 안 정리만 수행 — 지문은 AI가 정확히 번역하도록 프롬프트에 맡김
             if (beforeClean !== cleaned) {
                 console.log('[CAT] 🧹 병기 OFF 모드 - 잔존 병기 패턴 자동 정리');
             }
