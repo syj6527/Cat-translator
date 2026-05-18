@@ -82,13 +82,22 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                     <option value="strong" ${(settings.retranslateStrength === 'strong') ? 'selected' : ''}>강함 (완전히 다르게 강제)</option>
                 </select>
             </div>
-            <div class="cat-setting-row">
-                <label>원문 수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(✏️ 연필로 영어 수정 시)</span></label>
-                <select id="ct-after-edit" class="text_pole">
-                    <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역 버튼 (기본)</option>
-                    <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
-                    <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 번역 유지</option>
-                </select>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div class="cat-setting-row" style="flex:1; min-width:180px; margin-bottom:0;">
+                    <label>원문 수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(봇 ✏️)</span></label>
+                    <select id="ct-after-edit" class="text_pole">
+                        <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역 버튼</option>
+                        <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
+                        <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 번역 유지</option>
+                    </select>
+                </div>
+                <div class="cat-setting-row" style="flex:1; min-width:180px; margin-bottom:0;">
+                    <label>유저 인풋 재번역 <span style="font-size:0.8em; opacity:0.6;">(유저 ✏️)</span></label>
+                    <select id="ct-user-input-mode" class="text_pole">
+                        <option value="english-only" ${(!settings.userInputMode || settings.userInputMode === 'english-only') ? 'selected' : ''}>영어 원문만 (기본)</option>
+                        <option value="bidirectional" ${settings.userInputMode === 'bidirectional' ? 'selected' : ''}>양방향 (한↔영)</option>
+                    </select>
+                </div>
             </div>
             <div class="cat-setting-row" style="display:none"><label>시스템 보호막 (🔒 고정)</label><textarea id="ct-shield" class="text_pole cat-readonly-area" rows="3" readonly>${SYSTEM_SHIELD}</textarea></div>
             <div class="cat-setting-row">
@@ -145,7 +154,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     };
     
     // 모든 설정 필드에 자동 저장 연결
-    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit').on('change', autoSave);
+    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit, #ct-user-input-mode').on('change', autoSave);
     $('#ct-key, #ct-model-custom, #ct-user-prompt, #ct-dictionary').on('input', autoSave);
     
     $('#ct-model').val(settings.directModel).on('change', function () {
@@ -378,7 +387,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
         $('#ct-model').val('gemini-2.5-flash'); $('#ct-model-custom').val('').hide();
-        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify');
+        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify'); $('#ct-user-input-mode').val('english-only');
         $('#ct-temperature').val(0.3); $('#ct-max-tokens').val(8192); $('#ct-context-range').val(1);
         $('#ct-user-prompt').val(''); $('#ct-dictionary').val(''); $('#ct-dict-reset').text('📭');
         settings.promptPresets = {}; settings.charPresetMap = {}; $('#ct-prompt-preset').val('').find('option:not(:first)').remove();
@@ -415,6 +424,7 @@ export function collectSettings() {
         userPrompt: $('#ct-user-prompt').val() || '', dictionary: $('#ct-dictionary').val() || '',
         retranslateStrength: $('#ct-retranslate-strength').val() || 'normal',
         afterEditMode: $('#ct-after-edit').val() || 'notify',
+        userInputMode: $('#ct-user-input-mode').val() || 'english-only',
         promptPresets: _settingsRef?.promptPresets || {}, charPresetMap: _settingsRef?.charPresetMap || {}
     };
 }
@@ -947,8 +957,8 @@ function showEditHistoryPopup(msgId) {
     const currentPreview = truncate(current, 2000);
     
     const popup = $(`
-        <div class="cat-edit-history-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99998; display:flex; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
-            <div class="cat-edit-history-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px; max-width:90vw; width:540px; max-height:85vh; overflow-y:auto; box-sizing:border-box;">
+        <div class="cat-edit-history-overlay" style="background:rgba(0,0,0,0.6);">
+            <div class="cat-edit-history-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px;">
                 <div class="cat-edit-history-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <h3 style="margin:0; font-size:1.1em;">🕓 수정 히스토리 #${msgId}</h3>
                     <span class="cat-edit-history-close" style="cursor:pointer; font-size:1.4em; opacity:0.7; padding:0 6px;">✕</span>
@@ -1041,8 +1051,8 @@ window._catShowDamagedRecovery = showDamagedRecoveryToast;
 function showManualOriginalPopup(msgId) {
     $('.cat-manual-overlay').remove();
     const popup = $(`
-        <div class="cat-manual-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99998; display:flex; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
-            <div class="cat-manual-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px; max-width:90vw; width:520px; box-sizing:border-box;">
+        <div class="cat-manual-overlay" style="background:rgba(0,0,0,0.6);">
+            <div class="cat-manual-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <h3 style="margin:0; font-size:1.05em;">📝 영어 원본 수동 입력 #${msgId}</h3>
                     <span class="cat-manual-close" style="cursor:pointer; font-size:1.3em; opacity:0.7; padding:0 6px;">✕</span>
@@ -1162,8 +1172,8 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 mesBlock.removeData('cat-edit-display').removeData('cat-edit-original');
                 
                 if (savedDisplay && savedOriginal) {
-                    // 🚨 v1.0.5: 한국어 위주 오염만 차단 (영어+한국어 혼합 통과)
-                    const hasKorean = (window._catIsMostlyKorean||(()=>false))(msg.mes);
+                    // 🚨 v1.0.5: 한국어 위주 오염은 봇 메시지에만 차단 (유저 메시지는 한국어 입력이 정상)
+                    const hasKorean = !msg.is_user && (window._catIsMostlyKorean||(()=>false))(msg.mes);
                     if (hasKorean) {
                         if (!msg.extra) msg.extra = {};
                         msg.extra.original_mes = savedOriginal;

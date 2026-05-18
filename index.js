@@ -20,7 +20,7 @@ function isMostlyKorean(text) {
 }
 window._catIsMostlyKorean = isMostlyKorean;
 
-const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', afterEditMode: 'notify', promptPresets: {}, charPresetMap: {} };
+const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', afterEditMode: 'notify', userInputMode: 'english-only', promptPresets: {}, charPresetMap: {} };
 // 베타 → 정식 설정 마이그레이션 (기존 사용자 설정 보존)
 if (!extension_settings[EXT_NAME] && extension_settings["cat-translator-beta"]) {
     extension_settings[EXT_NAME] = { ...extension_settings["cat-translator-beta"] };
@@ -407,13 +407,19 @@ jQuery(async () => {
         const id = parseInt(typeof msgId === 'object' ? msgId.messageId : msgId);
         const msg = stContext.chat[id];
         if (!msg) return;
-        if (msg.is_user) return;
         if (msg.is_system === true || msg.extra?.media?.length > 0) return;
         if (!msg.extra?.original_mes) return;
         
         const mode = settings.afterEditMode || 'notify';
         if (mode === 'keep') return;
         
+        // 🚨 v1.0.5: 유저 인풋 메시지 별도 처리 (한국어/영어 방향 무관, 손상 검사 없음)
+        if (msg.is_user) {
+            handleUserEditSaved(id, msg, capturedText, mode);
+            return;
+        }
+        
+        // (이하는 봇 메시지 처리 — 기존 동작 유지)
         // 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
         let newOriginal = msg.mes;
         // 🚨 v1.0.5: 비율 기반 검사 (영어+한국어 혼합 텍스트는 한국어로 오인 안 함)
@@ -504,12 +510,59 @@ jQuery(async () => {
         }
     }
     
+    // 🚨 v1.0.5: 유저 인풋 메시지 수정 처리 (자동 재번역 + 히스토리, 손상 검사 없음)
+    function handleUserEditSaved(id, msg, capturedText, mode) {
+        // 새 원문: captured 우선, 없으면 msg.mes
+        const newOriginal = (capturedText && capturedText.length > 0) ? capturedText : msg.mes;
+        if (!newOriginal || newOriginal.length < 1) return;
+        if (newOriginal === msg.extra.original_mes) return;
+        
+        // 🚨 v1.0.5: userInputMode 검사 (english-only일 때 한국어 위주 인풋 스킵)
+        const userInputMode = settings.userInputMode || 'english-only';
+        if (userInputMode === 'english-only' && isMostlyKorean(newOriginal)) {
+            console.log(`[CAT] 🚫 유저 #${id}: 영어 전용 모드, 한국어 위주 인풋 스킵`);
+            return;
+        }
+        
+        console.log(`[CAT] ✏️ 유저 인풋 원문 갱신 #${id}: "${msg.extra.original_mes.substring(0,30)}..." → "${newOriginal.substring(0,30)}..."`);
+        
+        // 히스토리에 이전 원문 push (양방향 모드는 한국어 검사 패스, 영어전용 모드도 통과)
+        pushEditHistory(msg, msg.extra.original_mes, userInputMode === 'bidirectional');
+        
+        // 새 원문 적용
+        msg.mes = newOriginal;
+        msg.extra.original_mes = newOriginal;
+        
+        if (mode === 'auto') {
+            delete msg.extra.display_text;
+            if (msg.extra.swipe_translations && msg.swipe_id !== undefined) {
+                delete msg.extra.swipe_translations[msg.swipe_id];
+            }
+            delete msg.extra.cat_swipe_id;
+            $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
+            stContext.updateMessageBlock(id, msg);
+            catNotify(`${getThemeEmoji()} 유저 원문 수정 → 자동 재번역 중...`, "info");
+            const modelKey = getCacheModelKey(settings);
+            const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
+            deleteCached(msg.mes, targetLang, modelKey);
+            // 유저 메시지는 isUser=true로 processMessage 호출
+            setTimeout(() => processMessage(id, true, null, false, true), 300);
+        } else {
+            // notify 모드: 토스트
+            if (typeof window._catShowRetranslatePrompt === 'function') {
+                // showRetranslatePrompt는 봇 기준이라 isUser 처리 위해 직접 처리
+                stContext.updateMessageBlock(id, msg);
+                catNotify(`${getThemeEmoji()} 유저 원문 수정 감지 (재번역 버튼 누르세요).`, "info");
+            }
+        }
+    }
+    
     // 🚨 v1.0.5 히스토리 관리 함수들
-    function pushEditHistory(msg, previousOriginal) {
+    function pushEditHistory(msg, previousOriginal, skipKoreanCheck = false) {
         if (!msg.extra) msg.extra = {};
         if (!Array.isArray(msg.extra.cat_edit_history)) msg.extra.cat_edit_history = [];
-        // 한국어 위주 손상본은 히스토리에 push 안 함 (의미 없음)
-        if (isMostlyKorean(previousOriginal)) return;
+        // 봇: 한국어 위주 손상본은 push 안 함 / 유저: 검사 패스 (한국어/영어 둘 다 정상)
+        if (!skipKoreanCheck && isMostlyKorean(previousOriginal)) return;
         // 중복 방지 (가장 마지막 항목과 같으면 skip)
         const lastEntry = msg.extra.cat_edit_history[msg.extra.cat_edit_history.length - 1];
         if (lastEntry && lastEntry.original === previousOriginal) return;
@@ -524,11 +577,19 @@ jQuery(async () => {
         if (!msg?.extra?.cat_edit_history) return;
         const entry = msg.extra.cat_edit_history[historyIndex];
         if (!entry) return;
-        // 현재 original을 히스토리에 push (덮어쓰기 전, 한국어 위주면 skip)
+        const isUser = !!msg.is_user;
+        // 🚨 v1.0.5: 유저 + 영어전용 모드면 한국어 위주 항목으로 복원 차단
+        const userInputMode = settings.userInputMode || 'english-only';
+        if (isUser && userInputMode === 'english-only' && isMostlyKorean(entry.original)) {
+            catNotify(`${getThemeEmoji()} 영어 전용 모드: 한국어 위주 항목은 복원 불가.`, "warning");
+            return;
+        }
+        // 현재 original을 히스토리에 push (봇은 한국어 검사 / 유저 양방향 모드는 검사 패스)
         const currentOriginal = msg.extra.original_mes;
+        const skipKoreanCheck = isUser && userInputMode === 'bidirectional';
         // 선택한 히스토리 항목을 빼고, 나머지에 현재를 끝에 push
         const newHistory = msg.extra.cat_edit_history.filter((_, i) => i !== historyIndex);
-        if (currentOriginal && !isMostlyKorean(currentOriginal)) {
+        if (currentOriginal && (skipKoreanCheck || !isMostlyKorean(currentOriginal))) {
             // 중복 방지
             const lastEntry = newHistory[newHistory.length - 1];
             if (!lastEntry || lastEntry.original !== currentOriginal) {
@@ -551,7 +612,7 @@ jQuery(async () => {
         const modelKey = getCacheModelKey(settings);
         const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
         deleteCached(msg.mes, targetLang, modelKey);
-        setTimeout(() => processMessage(id, false, null, false, false), 300);
+        setTimeout(() => processMessage(id, isUser, null, false, isUser), 300);
     }
     
     function setManualOriginal(msgId, englishText) {
