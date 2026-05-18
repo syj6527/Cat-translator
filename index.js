@@ -347,27 +347,57 @@ jQuery(async () => {
         handleEditSaved(msgId);
     });
     
-    // 🚨 ST 저장 클릭 직전 textarea 값 캡처 (mousedown/touchstart가 click보다 먼저 발동)
-    // ST가 click 후 msg.mes를 한국어로 덮어쓸 수 있어서 미리 영어 원본 캡처 필요
-    $(document).on('mousedown touchstart', '.mes_edit_done, .mes_edit_save, .edit_mes_save, [class*="mes_edit_done"]', function () {
+    // 🚨 textarea 값 실시간 추적 (글로벌 Map으로 저장 - DOM 재생성에도 보존)
+    window._catCapturedText = window._catCapturedText || new Map();
+    
+    $(document).on('input keyup change', 'textarea.edit_textarea, textarea.mes_edit_textarea, .mes textarea', function() {
         const mesBlock = $(this).closest('.mes');
-        const textarea = mesBlock.find('textarea.edit_textarea, textarea.mes_edit_textarea').first();
-        if (textarea.length > 0) {
-            const captured = textarea.val();
-            mesBlock.data('cat-captured-text', captured);
-            console.log(`[CAT] 📸 textarea 캡처 #${mesBlock.attr('mesid')}: ${captured.substring(0, 50)}...`);
+        const msgId = mesBlock.attr('mesid');
+        const val = $(this).val();
+        if (msgId && val && val.length > 0) {
+            window._catCapturedText.set(msgId, val);
+            console.log(`[CAT] 📝 textarea 변경 #${msgId}: ${val.substring(0, 40)}...`);
         }
     });
     
-    // 🚨 ST 저장 체크 버튼(✓) 클릭 직접 감지 (가장 확실한 백업)
+    // 🚨 ST 저장 클릭 직전 textarea 값 캡처
+    $(document).on('mousedown touchstart', '.mes_edit_done, .mes_edit_save, .edit_mes_save, [class*="mes_edit_done"]', function () {
+        const mesBlock = $(this).closest('.mes');
+        const msgId = mesBlock.attr('mesid');
+        // 가장 최근에 보이는 textarea 즉시 캡처
+        const textarea = mesBlock.find('textarea').first();
+        if (textarea.length > 0 && textarea.val()) {
+            window._catCapturedText.set(msgId, textarea.val());
+            console.log(`[CAT] 📸 mousedown 캡처 #${msgId}: ${textarea.val().substring(0, 40)}...`);
+        }
+    });
+    
+    // 🚨 ST 저장 체크 버튼(✓) 클릭 직접 감지
     $(document).on('click', '.mes_edit_done, .mes_edit_save, .edit_mes_save, [class*="mes_edit_done"]', function () {
         const mesBlock = $(this).closest('.mes');
         const msgId = parseInt(mesBlock.attr('mesid'));
-        const captured = mesBlock.data('cat-captured-text');
-        mesBlock.removeData('cat-captured-text');
-        console.log(`[CAT] ✓ 저장 버튼 클릭 감지 #${msgId}`);
-        catNotify(`${getThemeEmoji()} 편집 저장 감지 #${msgId}`, "info");
-        // ST 처리 완료 후 핸들러 호출 (captured는 영어 원본 백업)
+        
+        // 진단: 클릭 시점 textarea 상태 확인
+        const $allTextareas = mesBlock.find('textarea');
+        const $textarea = $allTextareas.first();
+        let capturedNow = null;
+        if ($textarea.length > 0) {
+            capturedNow = $textarea.val();
+            if (capturedNow) {
+                window._catCapturedText.set(String(msgId), capturedNow);
+            }
+        }
+        
+        const fromMap = window._catCapturedText.get(String(msgId));
+        const captured = capturedNow || fromMap;
+        window._catCapturedText.delete(String(msgId));
+        
+        // 🚨 진단 알림: 어디서 캡처됐는지 확실히 표시
+        const source = capturedNow ? '클릭시점' : (fromMap ? 'Map' : '없음');
+        const preview = captured ? captured.substring(0, 30) : '(빈값)';
+        catNotify(`${getThemeEmoji()} #${msgId} 캡처[${source}]: ${preview}`, "info");
+        console.log(`[CAT] ✓ 저장 #${msgId} textarea개수:${$allTextareas.length} 캡처:${captured ? captured.substring(0, 50) : '없음'}`);
+        
         setTimeout(() => handleEditSaved(msgId, captured), 500);
     });
     
