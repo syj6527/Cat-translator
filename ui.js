@@ -828,6 +828,19 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 mesBlock.data('cat-edit-active', true);
                 if (msg.extra?.display_text) mesBlock.data('cat-edit-display', msg.extra.display_text);
                 if (msg.extra?.original_mes) mesBlock.data('cat-edit-original', msg.extra.original_mes);
+                
+                // 🚨 textarea에 직접 input 리스너 바인딩 (글로벌 Map에 저장)
+                // 위임 이벤트는 ST가 가로챌 수 있어서 직접 바인딩이 가장 확실
+                const msgIdStr = String(msgId);
+                window._catCapturedText = window._catCapturedText || new Map();
+                window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값
+                editArea.off('input.catedit keyup.catedit').on('input.catedit keyup.catedit', function() {
+                    const val = $(this).val();
+                    if (val) {
+                        window._catCapturedText.set(msgIdStr, val);
+                        console.log(`[CAT] 📝 textarea 직접 캡처 #${msgIdStr}: ${val.substring(0, 40)}...`);
+                    }
+                });
                 // 🚨 ST 연필 → 원문(영어) 그대로 표시 (ST 기본 동작 유지)
                 // 🚨 🐟/🍖 팝업에서 진입 → _editWatcher가 처리하므로 여기서 안 건드림
             } else if (editArea.length === 0 && mesBlock.data('cat-edit-active')) {
