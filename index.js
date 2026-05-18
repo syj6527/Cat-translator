@@ -396,13 +396,10 @@ jQuery(async () => {
     function handleEditSaved(msgId, capturedText = null) {
         const id = parseInt(typeof msgId === 'object' ? msgId.messageId : msgId);
         const msg = stContext.chat[id];
-        if (!msg) { catNotify(`${getThemeEmoji()} #${id}: msg 없음`, "warning"); return; }
+        if (!msg) return;
         if (msg.is_user) return;
         if (msg.is_system === true || msg.extra?.media?.length > 0) return;
-        if (!msg.extra?.original_mes) { 
-            catNotify(`${getThemeEmoji()} #${id}: original_mes 없음 (번역 안된 메시지)`, "warning");
-            return; 
-        }
+        if (!msg.extra?.original_mes) return;
         
         const mode = settings.afterEditMode || 'notify';
         if (mode === 'keep') return;
@@ -411,12 +408,13 @@ jQuery(async () => {
         let newOriginal = msg.mes;
         const capturedIsKorean = capturedText && /[가-힣]/.test(capturedText) && capturedText.length > 10;
         const mesIsKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+        const origIsKorean = /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
         
-        // 🚨 진단: 어떤 분기 타는지 알림
-        const cap = capturedText ? `cap:${capturedIsKorean ? '한' : '영'}(${capturedText.length})` : 'cap:없음';
-        const mes = `mes:${mesIsKorean ? '한' : '영'}(${msg.mes.length})`;
-        const orig = `orig:(${msg.extra.original_mes.length})`;
-        catNotify(`${getThemeEmoji()} #${id} ${cap} ${mes} ${orig}`, "info");
+        // 🚨 영어 원본 자체가 손상된 경우 (original_mes가 한국어)
+        if (origIsKorean) {
+            catNotify(`${getThemeEmoji()} 이 메시지는 영어 원본이 손상됐어요. ST 🔄 재생성으로 복구하세요.`, "warning");
+            return;
+        }
         
         if (capturedText && !capturedIsKorean) {
             newOriginal = capturedText;
@@ -424,15 +422,11 @@ jQuery(async () => {
             // msg.mes가 한국어로 오염 + captured도 없음 → 원문 보존만
             msg.mes = msg.extra.original_mes;
             stContext.updateMessageBlock(id, msg);
-            catNotify(`${getThemeEmoji()} #${id}: 한국어 차단 (캡처 실패)`, "warning");
             return;
         }
         
         // 영어가 실제로 수정되었는지 확인
-        if (newOriginal === msg.extra.original_mes) {
-            catNotify(`${getThemeEmoji()} #${id}: 변경 감지 안 됨 (newOriginal === original_mes)`, "warning");
-            return;
-        }
+        if (newOriginal === msg.extra.original_mes) return;
         
         console.log(`[CAT] ✏️ 원문 갱신 #${id}: "${msg.extra.original_mes.substring(0,30)}..." → "${newOriginal.substring(0,30)}..."`);
         

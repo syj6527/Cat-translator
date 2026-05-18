@@ -317,6 +317,8 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('현재 채팅의 모든 메시지에서 swipe 번역 캐시 + 동기화 정보 + 편집 상태를 정리합니다.\n\n표시되는 번역(display_text)은 유지되지만, 다른 스와이프의 저장된 번역들은 삭제됩니다.\n\n계속하시겠어요?')) return;
         
         let cleaned = 0;
+        let damaged = []; // 영어 원본이 손실된 메시지 ID
+        
         ctx.chat.forEach((msg, i) => {
             if (!msg?.extra) return;
             let touched = false;
@@ -325,13 +327,20 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
             if (msg.extra.swipe_translations) { delete msg.extra.swipe_translations; touched = true; }
             if (msg.extra.cat_swipe_id !== undefined) { delete msg.extra.cat_swipe_id; touched = true; }
             
-            // 2. 한국어 오염 복구 (msg.mes에 한국어가 들어간 경우)
-            if (msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10) {
+            // 2. 한국어 오염 검사
+            const mesIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+            const origIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
+            
+            if (origIsKorean) {
+                // 🚨 영어 원본 자체가 손실됨 - 복구 불가
+                damaged.push(i);
+            } else if (mesIsKorean && msg.extra.original_mes) {
+                // msg.mes만 오염 → original_mes에서 복원 가능
                 msg.mes = msg.extra.original_mes;
                 touched = true;
             }
             
-            // 3. DOM 측 정리: mesBlock의 jQuery data + 편집 상태 속성
+            // 3. DOM 측 정리
             const $mes = $(`.mes[mesid="${i}"]`);
             if ($mes.length > 0) {
                 $mes.removeData('cat-edit-active')
@@ -339,8 +348,8 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                     .removeData('cat-edit-original')
                     .removeData('cat-edit-type')
                     .removeData('cat-captured-text')
-                    .removeData('cat-last-textarea');
-                // 글로우 stuck 정리
+                    .removeData('cat-last-textarea')
+                    .removeData('cat-direct-bound');
                 $mes.find('.cat-glow-anim').removeClass('cat-glow-anim');
             }
             
@@ -351,13 +360,18 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (window._catCapturedText) window._catCapturedText.clear();
         
         try { ctx.saveChat(); } catch (e) {}
-        catNotify(`${getThemeEmoji()} ${cleaned}개 메시지 정리 완료!`, "success");
-        // 안내: 그래도 안 되면 새로고침 권장
+        
+        let msg = `${getThemeEmoji()} ${cleaned}개 메시지 정리 완료!`;
+        if (damaged.length > 0) {
+            msg += `\n\n⚠️ 영어 원본 손상 (#${damaged.join(', #')}): 이 메시지들은 자동 재번역 불가. ST의 🔄 재생성 또는 메시지 삭제 필요.`;
+        }
+        catNotify(msg, damaged.length > 0 ? "warning" : "success");
+        
         setTimeout(() => {
             if (confirm('정리 완료! 그래도 자동 재번역이 안 되면 페이지 새로고침을 권장해요. 지금 새로고침할까요?')) {
                 location.reload();
             }
-        }, 1000);
+        }, 1500);
     });
     
     $('#ct-reset-settings').on('click', () => {
