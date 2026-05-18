@@ -119,6 +119,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                 <button id="ct-export" class="menu_button cat-btn-secondary" style="flex:1;">📤 내보내기</button><button id="ct-import-btn" class="menu_button cat-btn-secondary" style="flex:1;">📥 가져오기</button>
                 <input type="file" id="ct-import-file" accept=".json" style="display:none;">
             </div>
+            <button id="ct-clean-chat" class="menu_button cat-btn-secondary" style="width:100%; margin-top:8px;">🧹 현재 채팅 오염 정리 (자동 재번역 안 될 때)</button>
             <button id="cat-save-btn" class="menu_button cat-save-button" style="margin-top:10px; width:100%;">설정 저장 및 적용 <span class="cat-theme-emoji">🐱</span></button>
             <button id="ct-debug-btn" class="menu_button cat-btn-secondary" style="margin-top:6px; width:100%;">🐛 마지막 LLM 응답 보기</button>
         </div>
@@ -308,6 +309,30 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     $('#ct-context-range').on('change', function () { let val = parseInt($(this).val()) || 0; val = Math.min(6, Math.max(0, val)); $(this).val(val); });
     $('#cat-save-btn').on('click', () => { saveSettingsFn(true); catNotify(`${getThemeEmoji()} 저장 완료! 기본 설정이 확정되었습니다.`, "success"); });
     $('#ct-clear-cache').on('click', async () => { await clearAllCache(); updateCacheStats(); catNotify(`${getThemeEmoji()} 캐시 전체 삭제 완료! 📂`, "success"); });
+    
+    // 🚨 오염 채팅 정리: 자동 재번역이 안 되는 경우 사용
+    $('#ct-clean-chat').on('click', () => {
+        const ctx = SillyTavern?.getContext?.();
+        if (!ctx?.chat) { catNotify(`${getThemeEmoji()} 채팅을 찾을 수 없어요`, "warning"); return; }
+        if (!confirm('현재 채팅의 모든 메시지에서 swipe 번역 캐시 + 동기화 정보를 정리합니다.\n\n표시되는 번역(display_text)은 유지되지만, 다른 스와이프의 저장된 번역들은 삭제됩니다.\n\n계속하시겠어요?')) return;
+        
+        let cleaned = 0;
+        ctx.chat.forEach((msg) => {
+            if (!msg?.extra) return;
+            let touched = false;
+            if (msg.extra.swipe_translations) { delete msg.extra.swipe_translations; touched = true; }
+            if (msg.extra.cat_swipe_id !== undefined) { delete msg.extra.cat_swipe_id; touched = true; }
+            // 한국어가 msg.mes에 들어간 오염 케이스 자동 복구
+            if (msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10) {
+                msg.mes = msg.extra.original_mes;
+                touched = true;
+            }
+            if (touched) cleaned++;
+        });
+        try { ctx.saveChat(); } catch (e) {}
+        catNotify(`${getThemeEmoji()} ${cleaned}개 메시지 정리 완료! 이제 자동 재번역이 작동해요.`, "success");
+    });
+    
     $('#ct-reset-settings').on('click', () => {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
