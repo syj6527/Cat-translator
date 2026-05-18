@@ -377,27 +377,18 @@ jQuery(async () => {
         const mesBlock = $(this).closest('.mes');
         const msgId = parseInt(mesBlock.attr('mesid'));
         
-        // 진단: 클릭 시점 textarea 상태 확인
-        const $allTextareas = mesBlock.find('textarea');
-        const $textarea = $allTextareas.first();
+        // 클릭 시점에 textarea 값 캡처 (가장 확실한 영어 원본 백업)
+        const $textarea = mesBlock.find('textarea').first();
         let capturedNow = null;
         if ($textarea.length > 0) {
             capturedNow = $textarea.val();
-            if (capturedNow) {
-                window._catCapturedText.set(String(msgId), capturedNow);
-            }
+            if (capturedNow) window._catCapturedText.set(String(msgId), capturedNow);
         }
         
-        const fromMap = window._catCapturedText.get(String(msgId));
-        const captured = capturedNow || fromMap;
+        const captured = capturedNow || window._catCapturedText.get(String(msgId));
         window._catCapturedText.delete(String(msgId));
         
-        // 🚨 진단 알림: 어디서 캡처됐는지 확실히 표시
-        const source = capturedNow ? '클릭시점' : (fromMap ? 'Map' : '없음');
-        const preview = captured ? captured.substring(0, 30) : '(빈값)';
-        catNotify(`${getThemeEmoji()} #${msgId} 캡처[${source}]: ${preview}`, "info");
-        console.log(`[CAT] ✓ 저장 #${msgId} textarea개수:${$allTextareas.length} 캡처:${captured ? captured.substring(0, 50) : '없음'}`);
-        
+        console.log(`[CAT] ✓ 저장 #${msgId} 캡처: ${captured ? captured.substring(0, 50) : '없음'}`);
         setTimeout(() => handleEditSaved(msgId, captured), 500);
     });
     
@@ -405,45 +396,32 @@ jQuery(async () => {
     function handleEditSaved(msgId, capturedText = null) {
         const id = parseInt(typeof msgId === 'object' ? msgId.messageId : msgId);
         const msg = stContext.chat[id];
-        if (!msg) { console.log(`[CAT] ⚠️ msg 없음 #${id}`); return; }
+        if (!msg) return;
         if (msg.is_user) return;
         if (msg.is_system === true || msg.extra?.media?.length > 0) return;
-        if (!msg.extra?.original_mes) { 
-            console.log(`[CAT] ⚠️ original_mes 없음 #${id}`); 
-            catNotify(`${getThemeEmoji()} #${id}: 번역 안 된 메시지`, "warning");
-            return; 
-        }
+        if (!msg.extra?.original_mes) return;
         
         const mode = settings.afterEditMode || 'notify';
         if (mode === 'keep') return;
         
-        // 🚨 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
+        // 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
         let newOriginal = msg.mes;
         const capturedIsKorean = capturedText && /[가-힣]/.test(capturedText) && capturedText.length > 10;
         const mesIsKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
         
         if (capturedText && !capturedIsKorean) {
-            // captured가 영어 → 가장 신뢰할 수 있는 새 원문
             newOriginal = capturedText;
-            console.log(`[CAT] 📸 captured 영어 사용 #${id}: ${newOriginal.substring(0, 50)}`);
         } else if (mesIsKorean) {
-            // msg.mes가 한국어로 오염됨 → captured도 없음 → 처리 불가
+            // msg.mes가 한국어로 오염 + captured도 없음 → 원문 보존만
             msg.mes = msg.extra.original_mes;
             stContext.updateMessageBlock(id, msg);
-            console.log(`[CAT] 🛡️ 한국어 차단 #${id}`);
-            catNotify(`${getThemeEmoji()} #${id}: 한국어 감지 → 원문 보존`, "warning");
             return;
         }
         
         // 영어가 실제로 수정되었는지 확인
-        if (newOriginal === msg.extra.original_mes) { 
-            console.log(`[CAT] ➖ 변경 없음 #${id}`); 
-            catNotify(`${getThemeEmoji()} #${id}: 변경 없음`, "info");
-            return; 
-        }
+        if (newOriginal === msg.extra.original_mes) return;
         
         console.log(`[CAT] ✏️ 원문 갱신 #${id}: "${msg.extra.original_mes.substring(0,30)}..." → "${newOriginal.substring(0,30)}..."`);
-        catNotify(`${getThemeEmoji()} #${id}: 원문 수정 감지! 처리 중...`, "info");
         
         // 새 원문 적용
         msg.mes = newOriginal;
@@ -457,6 +435,7 @@ jQuery(async () => {
             delete msg.extra.cat_swipe_id;
             $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
             stContext.updateMessageBlock(id, msg);
+            catNotify(`${getThemeEmoji()} 원문 수정 감지 → 자동 재번역 중...`, "info");
             const modelKey = getCacheModelKey(settings);
             const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
             deleteCached(msg.mes, targetLang, modelKey);
@@ -638,7 +617,6 @@ jQuery(async () => {
             _editPollProcessed.set(idx, fingerprint);
             
             console.log(`[CAT] 🔍 폴링 감지: 원문 수정 #${idx} (mode: ${mode})`);
-            catNotify(`${getThemeEmoji()} 원문 수정 감지! 처리 중... #${idx}`, "info");
             msg.extra.original_mes = msg.mes;
             
             if (mode === 'auto') {
@@ -650,6 +628,7 @@ jQuery(async () => {
                 delete msg.extra.cat_swipe_id;
                 $(`.mes[mesid="${idx}"]`).removeAttr('data-cat-translated');
                 stContext.updateMessageBlock(idx, msg);
+                catNotify(`${getThemeEmoji()} 원문 수정 감지 → 자동 재번역 중...`, "info");
                 // 🚨 캐시 우회: 새 원문에 대한 캐시 삭제 (이전 번역 재사용 방지)
                 const modelKey = getCacheModelKey(settings);
                 const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
