@@ -1,5 +1,5 @@
 // ============================================================
-// 🐱 Translator v1.0.4 - ui.js
+// 🐱 Translator v1.0.5 - ui.js
 // ============================================================
 import { catNotify, catNotifyProgress, getThemeEmoji, getCompletionEmoji, getModelTheme, setTextareaValue } from './utils.js';
 import { getStats, clearAllCache, exportSettings, importSettings, getHistory, togglePin } from './cache.js';
@@ -494,8 +494,19 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
         const msg = ctx?.chat?.[parseInt(msgId)];
         const hasTransData = msg?.extra?.original_mes || msg?.extra?.display_text;
         const editStyle = hasTransData ? 'opacity:0.8;' : 'opacity:0;pointer-events:none;';
-        const group = $(`<div class="cat-btn-group"><span class="cat-mes-trans-btn interactable" title="번역" data-mesid="${msgId}"><span class="cat-emoji-icon">${emoji}</span></span><span class="cat-mes-revert-btn interactable" title="복구" data-mesid="${msgId}"><i class="fa-solid fa-rotate-left"></i></span><span class="cat-mes-edit-btn interactable" title="편집" data-mesid="${msgId}" style="${editStyle}"><span class="cat-emoji-icon">${editEmoji}</span></span></div>`);
+        // 🚨 v1.0.5: 히스토리 버튼 표시 여부
+        const hasHistory = Array.isArray(msg?.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0;
+        const historyStyle = hasHistory ? 'opacity:0.8;' : 'opacity:0;pointer-events:none;';
+        const group = $(`<div class="cat-btn-group"><span class="cat-mes-trans-btn interactable" title="번역" data-mesid="${msgId}"><span class="cat-emoji-icon">${emoji}</span></span><span class="cat-mes-revert-btn interactable" title="복구" data-mesid="${msgId}"><i class="fa-solid fa-rotate-left"></i></span><span class="cat-mes-edit-btn interactable" title="편집" data-mesid="${msgId}" style="${editStyle}"><span class="cat-emoji-icon">${editEmoji}</span></span><span class="cat-mes-history-btn interactable" title="수정 히스토리" data-mesid="${msgId}" style="${historyStyle}"><span class="cat-emoji-icon">🕓</span></span></div>`);
         let target = $(this).find('.name_text'); if (target.length > 0) { target.append(group); } else { let sysWrap = $('<div style="text-align:right; margin-bottom:4px;"></div>'); sysWrap.append(group); $(this).find('.mes_text').first().prepend(sysWrap); }
+    });
+    // 🚨 v1.0.5: 기존 cat-btn-group에 🕓 버튼이 없으면 보강 (v1.0.4 → v1.0.5 업그레이드 케이스 대응)
+    $('.cat-btn-group:not(:has(.cat-mes-history-btn))').each(function () {
+        const $group = $(this);
+        const msgId = $group.closest('.mes').attr('mesid');
+        if (!msgId) return;
+        const $btn = $(`<span class="cat-mes-history-btn interactable" title="수정 히스토리" data-mesid="${msgId}" style="opacity:0;pointer-events:none;"><span class="cat-emoji-icon">🕓</span></span>`);
+        $group.append($btn);
     });
     // 🚨 이미 번역된 메시지의 편집 버튼 표시 복원 (인라인 스타일)
     if (ctx?.chat) {
@@ -506,6 +517,12 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
             if (msg?.extra?.original_mes || msg?.extra?.display_text) {
                 $(this).find('.cat-mes-edit-btn').css({ opacity: 0.8, 'pointer-events': 'auto' });
                 restoredCount++;
+            }
+            // 🚨 v1.0.5: 히스토리 버튼 표시 복원
+            if (Array.isArray(msg?.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0) {
+                $(this).find('.cat-mes-history-btn').css({ opacity: 0.8, 'pointer-events': 'auto' });
+            } else {
+                $(this).find('.cat-mes-history-btn').css({ opacity: 0, 'pointer-events': 'none' });
             }
         });
         if (restoredCount > 0) console.log(`[CAT] 🐟 편집 아이콘 복원: ${restoredCount}개 메시지`);
@@ -529,6 +546,12 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
                 return;
             }
             enterTranslatedEdit(mesBlock, msg, msgId);
+        });
+        // 🚨 v1.0.5: 🕓 히스토리 버튼 클릭
+        $(document).on('click', '.cat-mes-history-btn', function (e) {
+            e.stopPropagation();
+            const msgId = parseInt($(this).data('mesid') || $(this).closest('.mes').attr('mesid'));
+            if (!isNaN(msgId)) showEditHistoryPopup(msgId);
         });
     }
 }
@@ -871,6 +894,167 @@ function showRetranslatePrompt(msgId, processMessageFn) {
     });
     toast.find('.cat-retranslate-close').on('click', () => toast.remove());
     setTimeout(() => toast.fadeOut(400, () => toast.remove()), 10000);
+}
+
+// 🚨 v1.0.5: index.js의 origIsKorean 자동 복구 분기에서 호출
+window._catShowRetranslatePrompt = (msgId) => {
+    const fn = window._catProcessMessageRef;
+    if (typeof fn === 'function') showRetranslatePrompt(msgId, fn);
+};
+
+// 🚨 v1.0.5: HTML 이스케이프 헬퍼
+function _catEscapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 🚨 v1.0.5: 수정 히스토리 팝업 (🕓 버튼 클릭 또는 손상 토스트의 [🕓 히스토리에서 복구])
+function showEditHistoryPopup(msgId) {
+    const ctx = SillyTavern?.getContext?.();
+    const msg = ctx?.chat?.[msgId];
+    if (!msg?.extra) {
+        catNotify(`${getThemeEmoji()} 메시지 데이터가 없어요.`, "warning");
+        return;
+    }
+    const history = Array.isArray(msg.extra.cat_edit_history) ? msg.extra.cat_edit_history : [];
+    const current = msg.extra.original_mes || '(없음)';
+    
+    $('.cat-edit-history-overlay').remove();
+    
+    const fmtTime = (ts) => {
+        const d = new Date(ts);
+        return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    };
+    const truncate = (s, n) => s.length > n ? s.substring(0, n) + '…' : s;
+    
+    let historyHtml;
+    if (history.length === 0) {
+        historyHtml = `<div class="cat-edit-history-empty">아직 수정 히스토리가 없어요.<br><span style="font-size:0.85em; opacity:0.6;">원문을 ✏️로 수정하면 이전 버전이 여기 보관돼요. (최근 3개)</span></div>`;
+    } else {
+        // 최신부터 표시 (히스토리 배열은 오래된 것이 앞 → 뒤집어서 표시)
+        const reversed = history.map((entry, originalIdx) => ({ ...entry, originalIdx })).reverse();
+        historyHtml = reversed.map((entry, displayIdx) => {
+            const preview = truncate(entry.original, 250);
+            return `
+                <div class="cat-edit-history-item">
+                    <div class="cat-edit-history-meta">#${reversed.length - displayIdx} · ${fmtTime(entry.timestamp)}</div>
+                    <div class="cat-edit-history-text">${_catEscapeHtml(preview)}</div>
+                    <button class="cat-edit-history-restore menu_button" data-index="${entry.originalIdx}">↩️ 이걸로 되돌리기</button>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    const currentPreview = truncate(current, 250);
+    
+    const popup = $(`
+        <div class="cat-edit-history-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99998; display:flex; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
+            <div class="cat-edit-history-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px; max-width:90vw; width:540px; max-height:85vh; overflow-y:auto; box-sizing:border-box;">
+                <div class="cat-edit-history-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <h3 style="margin:0; font-size:1.1em;">🕓 수정 히스토리 #${msgId}</h3>
+                    <span class="cat-edit-history-close" style="cursor:pointer; font-size:1.4em; opacity:0.7; padding:0 6px;">✕</span>
+                </div>
+                <div class="cat-edit-history-current-wrap">
+                    <div class="cat-edit-history-meta">현재 원문 (활성)</div>
+                    <div class="cat-edit-history-text cat-edit-history-current">${_catEscapeHtml(currentPreview)}</div>
+                </div>
+                <hr style="border:none; border-top:1px solid rgba(255,255,255,0.1); margin:14px 0;">
+                <div class="cat-edit-history-list">${historyHtml}</div>
+            </div>
+        </div>
+    `);
+    
+    $('body').append(popup);
+    popup.find('.cat-edit-history-close').on('click', () => popup.remove());
+    popup.on('click', function(e) {
+        if (e.target === this) popup.remove();
+    });
+    popup.find('.cat-edit-history-restore').on('click', function() {
+        const idx = parseInt($(this).attr('data-index'));
+        popup.remove();
+        if (typeof window._catRestoreFromHistory === 'function') {
+            window._catRestoreFromHistory(msgId, idx);
+        } else {
+            catNotify(`${getThemeEmoji()} 복원 함수 연결 안 됨 (페이지 새로고침 필요).`, "warning");
+        }
+    });
+}
+
+// 🚨 v1.0.5: 손상된 원본 복구 토스트 (영어 후보가 captured/msg.mes에 없을 때)
+function showDamagedRecoveryToast(msgId) {
+    const ctx = SillyTavern?.getContext?.();
+    const msg = ctx?.chat?.[msgId];
+    if (!msg) return;
+    
+    const hasHistory = Array.isArray(msg.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0;
+    
+    $('.cat-damaged-toast').remove();
+    
+    const historyBtn = hasHistory 
+        ? `<button class="cat-damaged-history menu_button" style="padding:4px 10px; margin:0;">🕓 히스토리에서 복구</button>` 
+        : '';
+    
+    const toast = $(`
+        <div class="cat-damaged-toast" style="position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:99999; background:var(--SmartThemeBlurTintColor,#333); color:var(--SmartThemeBodyColor,#fff); border:1px solid #d77; border-radius:10px; padding:10px 14px; box-shadow:0 4px 16px rgba(0,0,0,0.3); display:flex; align-items:center; gap:8px; max-width:92vw; flex-wrap:wrap;">
+            <span>⚠️ 영어 원본이 손상됐어요 #${msgId}</span>
+            <button class="cat-damaged-manual menu_button" style="padding:4px 10px; margin:0;">📝 영어 직접 입력</button>
+            ${historyBtn}
+            <span class="cat-damaged-close" style="cursor:pointer; opacity:0.6; padding:0 4px;">✕</span>
+        </div>
+    `);
+    $('body').append(toast);
+    toast.find('.cat-damaged-manual').on('click', () => {
+        toast.remove();
+        showManualOriginalPopup(msgId);
+    });
+    toast.find('.cat-damaged-history').on('click', () => {
+        toast.remove();
+        showEditHistoryPopup(msgId);
+    });
+    toast.find('.cat-damaged-close').on('click', () => toast.remove());
+    setTimeout(() => toast.fadeOut(500, () => toast.remove()), 20000);
+}
+
+window._catShowDamagedRecovery = showDamagedRecoveryToast;
+
+// 🚨 v1.0.5: 영어 원본 수동 입력 팝업 (옵션 B)
+function showManualOriginalPopup(msgId) {
+    $('.cat-manual-overlay').remove();
+    const popup = $(`
+        <div class="cat-manual-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99998; display:flex; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
+            <div class="cat-manual-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px; max-width:90vw; width:520px; box-sizing:border-box;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <h3 style="margin:0; font-size:1.05em;">📝 영어 원본 수동 입력 #${msgId}</h3>
+                    <span class="cat-manual-close" style="cursor:pointer; font-size:1.3em; opacity:0.7; padding:0 6px;">✕</span>
+                </div>
+                <div style="font-size:0.85em; opacity:0.7; margin-bottom:8px; line-height:1.5;">손상된 한국어를 대체할 <b>영어 원본</b>을 붙여넣어주세요. 등록 후 바로 재번역됩니다.</div>
+                <textarea class="cat-manual-textarea text_pole" rows="8" placeholder="Paste English original here…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+                <div style="display:flex; gap:8px; margin-top:10px; justify-content:flex-end;">
+                    <button class="cat-manual-cancel menu_button cat-btn-secondary">취소</button>
+                    <button class="cat-manual-submit menu_button">✓ 등록 + 재번역</button>
+                </div>
+            </div>
+        </div>
+    `);
+    $('body').append(popup);
+    popup.find('.cat-manual-close, .cat-manual-cancel').on('click', () => popup.remove());
+    popup.on('click', function(e) {
+        if (e.target === this) popup.remove();
+    });
+    popup.find('.cat-manual-submit').on('click', () => {
+        const val = (popup.find('.cat-manual-textarea').val() || '').trim();
+        if (!val || val.length < 3) {
+            catNotify(`${getThemeEmoji()} 영어 원본을 입력해주세요.`, "warning");
+            return;
+        }
+        popup.remove();
+        if (typeof window._catSetManualOriginal === 'function') {
+            window._catSetManualOriginal(msgId, val);
+        } else {
+            catNotify(`${getThemeEmoji()} 등록 함수 연결 안 됨 (페이지 새로고침 필요).`, "warning");
+        }
+    });
+    setTimeout(() => popup.find('.cat-manual-textarea').focus(), 100);
 }
 
 export function setupMutationObserver(processMessageFn, revertMessageFn, settings, stContext) {
