@@ -342,46 +342,57 @@ jQuery(async () => {
     
     // 🚨 메시지 편집 직접 감지 (옵저버 백업) — afterEditMode 'auto'/'notify' 안전 트리거
     stContext.eventSource.on(stContext.event_types.MESSAGE_EDITED, (msgId) => {
-        const id = typeof msgId === 'object' ? msgId.messageId : msgId;
-        const msg = stContext.chat[parseInt(id)];
-        if (!msg || msg.is_user) return;
+        console.log(`[CAT] 🔔 MESSAGE_EDITED 이벤트 수신 #${msgId}`);
+        handleEditSaved(msgId);
+    });
+    
+    // 🚨 ST 저장 체크 버튼(✓) 클릭 직접 감지 (가장 확실한 백업)
+    $(document).on('click', '.mes_edit_done', function () {
+        const mesBlock = $(this).closest('.mes');
+        const msgId = parseInt(mesBlock.attr('mesid'));
+        console.log(`[CAT] ✓ mes_edit_done 클릭 감지 #${msgId}`);
+        // ST가 msg.mes 갱신 후 발동 → 약간 딜레이 후 처리
+        setTimeout(() => handleEditSaved(msgId), 200);
+    });
+    
+    // 🚨 편집 저장 통합 핸들러 (이벤트/클릭 모두에서 호출)
+    function handleEditSaved(msgId) {
+        const id = parseInt(typeof msgId === 'object' ? msgId.messageId : msgId);
+        const msg = stContext.chat[id];
+        if (!msg) { console.log(`[CAT] ⚠️ handleEditSaved: msg 없음 #${id}`); return; }
+        if (msg.is_user) return;
         if (msg.is_system === true || msg.extra?.media?.length > 0) return;
-        if (!msg.extra?.original_mes) return; // 번역 안 된 메시지는 무시
+        if (!msg.extra?.original_mes) { console.log(`[CAT] ⚠️ original_mes 없음 → 번역 안 된 메시지 #${id}`); return; }
         
         const mode = settings.afterEditMode || 'notify';
-        if (mode === 'keep') return; // 유지 모드는 아무것도 안 함
+        console.log(`[CAT] 🔧 편집 저장 처리 #${id} (mode: ${mode})`);
+        if (mode === 'keep') return;
         
         // msg.mes가 한국어면 오염 가능성 - 보호
         const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
         if (hasKorean) {
-            // 한국어가 들어왔으면 원본 복원
             msg.mes = msg.extra.original_mes;
-            stContext.updateMessageBlock(parseInt(id), msg);
-            console.log(`[CAT] 🛡️ MESSAGE_EDITED: 한국어 차단 #${id}`);
+            stContext.updateMessageBlock(id, msg);
+            console.log(`[CAT] 🛡️ 한국어 차단, 원문 복원 #${id}`);
             return;
         }
         
         // 영어가 실제로 수정되었는지 확인
-        if (msg.mes === msg.extra.original_mes) return; // 변경 없음
+        if (msg.mes === msg.extra.original_mes) { console.log(`[CAT] ➖ 변경 없음 #${id}`); return; }
         
-        console.log(`[CAT] ✏️ MESSAGE_EDITED 감지 #${id} (mode: ${mode}) — 원문 갱신`);
+        console.log(`[CAT] ✏️ 원문 갱신 #${id}: "${msg.extra.original_mes.substring(0,30)}..." → "${msg.mes.substring(0,30)}..."`);
         msg.extra.original_mes = msg.mes;
         
         if (mode === 'auto') {
-            const savedDisplay = msg.extra.display_text;
             delete msg.extra.display_text;
             $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
-            stContext.updateMessageBlock(parseInt(id), msg);
-            setTimeout(() => processMessage(parseInt(id), false, null, false, false), 300);
+            stContext.updateMessageBlock(id, msg);
+            console.log(`[CAT] 🔄 자동 재번역 트리거 #${id}`);
+            setTimeout(() => processMessage(id, false, null, false, false), 300);
         } else if (mode === 'notify') {
-            // notify 모드: 옵저버에서 처리하지만 누락 시 백업 트리거
-            // 옵저버가 이미 처리했으면 토스트가 떠 있음 → 중복 안 함
-            if ($('.cat-retranslate-toast').length === 0) {
-                // 이미 옵저버가 처리 안 한 경우만 백업으로 처리
-                // (옵저버가 처리한 경우 토스트가 있음)
-            }
+            // notify 모드는 옵저버에서 토스트 처리 (중복 방지)
         }
-    });
+    }
     const bodyObserver = new MutationObserver(() => { applyTheme(getCurrentTheme()); }); bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // 🚨 캐릭터 전환 시 번역 프롬프트 자동 로드
     stContext.eventSource.on(stContext.event_types.CHAT_CHANGED, () => {
