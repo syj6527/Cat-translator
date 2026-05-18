@@ -539,6 +539,50 @@ jQuery(async () => {
     // 5초 간격 상시 감시
     setInterval(() => repairContamination('watchdog'), 5000);
     
+    // 🚨 원문 수정 감지 폴링 (자동 재번역/알림 백업) — 3초 간격
+    // 이벤트/옵저버가 누락해도 폴링으로 100% 잡음
+    const _editPollProcessed = new Set();
+    setInterval(() => {
+        const mode = settings.afterEditMode || 'notify';
+        if (mode === 'keep') return;
+        if (!stContext.chat) return;
+        
+        stContext.chat.forEach((msg, idx) => {
+            if (!msg || msg.is_user) return;
+            if (msg.is_system === true || msg.extra?.media?.length > 0) return;
+            if (!msg.extra?.original_mes) return;
+            
+            // 한국어 차단 (오염 방지)
+            const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+            if (hasKorean) return;
+            
+            // 원문이 변경된 메시지 감지
+            if (msg.mes === msg.extra.original_mes) {
+                _editPollProcessed.delete(idx); // 동기화된 메시지는 처리 기록 초기화
+                return;
+            }
+            
+            // 이미 처리한 메시지는 스킵
+            const fingerprint = `${idx}:${msg.mes.substring(0, 50)}`;
+            if (_editPollProcessed.has(fingerprint)) return;
+            _editPollProcessed.add(fingerprint);
+            
+            console.log(`[CAT] 🔍 폴링 감지: 원문 수정 #${idx} (mode: ${mode})`);
+            msg.extra.original_mes = msg.mes;
+            
+            if (mode === 'auto') {
+                delete msg.extra.display_text;
+                $(`.mes[mesid="${idx}"]`).removeAttr('data-cat-translated');
+                stContext.updateMessageBlock(idx, msg);
+                catNotify(`${getThemeEmoji()} 원문 수정 감지 → 자동 재번역 중...`, "info");
+                setTimeout(() => processMessage(idx, false, null, false, false), 300);
+            } else if (mode === 'notify') {
+                stContext.updateMessageBlock(idx, msg);
+                catNotify(`${getThemeEmoji()} 원문이 수정되었어요. 메시지의 번역 버튼으로 재번역해주세요.`, "info");
+            }
+        });
+    }, 3000);
+    
     // 최초 로드 시 복구
     setTimeout(() => { repairContamination('init'); restoreSwipeTranslations('init'); }, 1500);
 });
