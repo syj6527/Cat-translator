@@ -2,7 +2,7 @@
 // 🐱 Translator v1.0.5
 // ============================================================
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
-import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey } from './utils.js';
+import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey, isMostlyKorean } from './utils.js';
 import { initCache, deleteCached } from './cache.js';
 import { fetchTranslation, gatherContextMessages } from './translator.js';
 import { setupSettingsPanel, collectSettings, updateCacheStats, injectMessageButtons, injectInputButtons, setupDragDictionary, setupMutationObserver, showHistoryPopup, applyTheme, setSuppressAutoSave, clearPendingAutoSave } from './ui.js';
@@ -406,9 +406,10 @@ jQuery(async () => {
         
         // 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
         let newOriginal = msg.mes;
-        const capturedIsKorean = capturedText && /[가-힣]/.test(capturedText) && capturedText.length > 10;
-        const mesIsKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
-        const origIsKorean = /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
+        // 🚨 v1.0.5: 비율 기반 검사 (영어+한국어 혼합 텍스트는 한국어로 오인 안 함)
+        const capturedIsKorean = capturedText && isMostlyKorean(capturedText);
+        const mesIsKorean = isMostlyKorean(msg.mes);
+        const origIsKorean = isMostlyKorean(msg.extra.original_mes);
         
         // 🚨 영어 원본 자체가 손상된 경우 (original_mes가 한국어)
         if (origIsKorean) {
@@ -497,8 +498,8 @@ jQuery(async () => {
     function pushEditHistory(msg, previousOriginal) {
         if (!msg.extra) msg.extra = {};
         if (!Array.isArray(msg.extra.cat_edit_history)) msg.extra.cat_edit_history = [];
-        // 한국어 손상본은 히스토리에 push 안 함 (의미 없음)
-        if (/[가-힣]/.test(previousOriginal) && previousOriginal.length > 10) return;
+        // 한국어 위주 손상본은 히스토리에 push 안 함 (의미 없음)
+        if (isMostlyKorean(previousOriginal)) return;
         // 중복 방지 (가장 마지막 항목과 같으면 skip)
         const lastEntry = msg.extra.cat_edit_history[msg.extra.cat_edit_history.length - 1];
         if (lastEntry && lastEntry.original === previousOriginal) return;
@@ -513,11 +514,11 @@ jQuery(async () => {
         if (!msg?.extra?.cat_edit_history) return;
         const entry = msg.extra.cat_edit_history[historyIndex];
         if (!entry) return;
-        // 현재 original을 히스토리에 push (덮어쓰기 전, 단 한국어면 skip은 pushEditHistory가 처리)
+        // 현재 original을 히스토리에 push (덮어쓰기 전, 한국어 위주면 skip)
         const currentOriginal = msg.extra.original_mes;
         // 선택한 히스토리 항목을 빼고, 나머지에 현재를 끝에 push
         const newHistory = msg.extra.cat_edit_history.filter((_, i) => i !== historyIndex);
-        if (currentOriginal && !(/[가-힣]/.test(currentOriginal) && currentOriginal.length > 10)) {
+        if (currentOriginal && !isMostlyKorean(currentOriginal)) {
             // 중복 방지
             const lastEntry = newHistory[newHistory.length - 1];
             if (!lastEntry || lastEntry.original !== currentOriginal) {
@@ -551,9 +552,9 @@ jQuery(async () => {
             catNotify(`${getThemeEmoji()} 원본 텍스트를 입력해주세요.`, "warning");
             return;
         }
-        // 한국어 길게 들어오면 차단 (실수 방지)
-        if (/[가-힣]/.test(englishText) && englishText.length > 10) {
-            catNotify(`${getThemeEmoji()} 영어 원본을 입력해주세요 (한국어 감지).`, "warning");
+        // 한국어 위주 입력만 차단 (영어 안에 한국어 인용/단어 섞이는 건 허용)
+        if (isMostlyKorean(englishText)) {
+            catNotify(`${getThemeEmoji()} 한국어 위주로 보여요. 영어 원본을 입력해주세요.`, "warning");
             return;
         }
         // 손상된 원본 자체는 push 안 함 (pushEditHistory가 한국어 차단)
@@ -590,7 +591,7 @@ jQuery(async () => {
             if (ctx?.chat) {
                 let fixedCount = 0;
                 ctx.chat.forEach((msg, i) => {
-                    if (!msg.is_user && msg.extra?.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10 && msg.mes !== msg.extra.original_mes) {
+                    if (!msg.is_user && msg.extra?.original_mes && isMostlyKorean(msg.mes) && msg.mes !== msg.extra.original_mes) {
                         msg.mes = msg.extra.original_mes;
                         fixedCount++;
                     }
@@ -673,8 +674,8 @@ jQuery(async () => {
                 if (msg.mes === msg.extra.display_text && msg.mes !== msg.extra.original_mes) {
                     msg.mes = msg.extra.original_mes;
                     repaired++;
-                } else if (/[가-힣]{3,}/.test(msg.mes) && msg.mes !== msg.extra.original_mes && !/[가-힣]/.test(msg.extra.original_mes)) {
-                    // original_mes에 한국어가 없는데 msg.mes에 한국어가 있으면 오염
+                } else if (isMostlyKorean(msg.mes) && msg.mes !== msg.extra.original_mes && !isMostlyKorean(msg.extra.original_mes)) {
+                    // original_mes가 한국어 위주가 아닌데 msg.mes가 한국어 위주 → 오염
                     msg.mes = msg.extra.original_mes;
                     repaired++;
                 }
@@ -740,9 +741,8 @@ jQuery(async () => {
             if (msg.is_system === true || msg.extra?.media?.length > 0) return;
             if (!msg.extra?.original_mes) return;
             
-            // 한국어 차단 (오염 방지)
-            const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
-            if (hasKorean) return;
+            // 🚨 v1.0.5: 한국어 위주 차단 (영어+한국어 혼합 통과)
+            if (isMostlyKorean(msg.mes)) return;
             
             // 원문이 변경된 메시지 감지
             if (msg.mes === msg.extra.original_mes) {
