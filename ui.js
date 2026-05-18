@@ -82,6 +82,14 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                     <option value="strong" ${(settings.retranslateStrength === 'strong') ? 'selected' : ''}>강함 (완전히 다르게 강제)</option>
                 </select>
             </div>
+            <div class="cat-setting-row">
+                <label>원문 수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(✏️ 연필로 영어 수정 시)</span></label>
+                <select id="ct-after-edit" class="text_pole">
+                    <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역 버튼 (기본)</option>
+                    <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
+                    <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 번역 유지</option>
+                </select>
+            </div>
             <div class="cat-setting-row" style="display:none"><label>시스템 보호막 (🔒 고정)</label><textarea id="ct-shield" class="text_pole cat-readonly-area" rows="3" readonly>${SYSTEM_SHIELD}</textarea></div>
             <div class="cat-setting-row">
                 <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px;">
@@ -136,7 +144,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     };
     
     // 모든 설정 필드에 자동 저장 연결
-    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength').on('change', autoSave);
+    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit').on('change', autoSave);
     $('#ct-key, #ct-model-custom, #ct-user-prompt, #ct-dictionary').on('input', autoSave);
     
     $('#ct-model').val(settings.directModel).on('change', function () {
@@ -304,7 +312,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
         $('#ct-model').val('gemini-2.5-flash'); $('#ct-model-custom').val('').hide();
-        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal');
+        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify');
         $('#ct-temperature').val(0.3); $('#ct-max-tokens').val(8192); $('#ct-context-range').val(1);
         $('#ct-user-prompt').val(''); $('#ct-dictionary').val(''); $('#ct-dict-reset').text('📭');
         settings.promptPresets = {}; settings.charPresetMap = {}; $('#ct-prompt-preset').val('').find('option:not(:first)').remove();
@@ -340,6 +348,7 @@ export function collectSettings() {
         contextRange: Math.min(6, Math.max(0, parseInt($('#ct-context-range').val()) || 1)),
         userPrompt: $('#ct-user-prompt').val() || '', dictionary: $('#ct-dictionary').val() || '',
         retranslateStrength: $('#ct-retranslate-strength').val() || 'normal',
+        afterEditMode: $('#ct-after-edit').val() || 'notify',
         promptPresets: _settingsRef?.promptPresets || {}, charPresetMap: _settingsRef?.charPresetMap || {}
     };
 }
@@ -775,6 +784,29 @@ function showDragDictPopup(selectedText, rect, settings, saveSettingsFn) {
     popup.find('.cat-drag-register').on('click', doRegister); popup.find('.cat-drag-input').on('keydown', (e) => { if (e.key === 'Enter') doRegister(); if (e.key === 'Escape') popup.remove(); }); popup.find('.cat-drag-cancel').on('click', () => popup.remove());
 }
 
+// 🚨 원문 수정 감지 → 재번역 안내 토스트 (afterEditMode === 'notify')
+function showRetranslatePrompt(msgId, processMessageFn) {
+    $('.cat-retranslate-toast').remove();
+    const toast = $(`
+        <div class="cat-retranslate-toast" style="position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:99999; background:var(--SmartThemeBlurTintColor,#333); color:var(--SmartThemeBodyColor,#fff); border:1px solid var(--ca-accent,#888); border-radius:10px; padding:10px 14px; box-shadow:0 4px 16px rgba(0,0,0,0.3); display:flex; align-items:center; gap:10px; max-width:90vw;">
+            <span>${getThemeEmoji()} 원문이 수정되었어요. 재번역할까요?</span>
+            <button class="cat-retranslate-yes menu_button" style="padding:4px 10px; margin:0;">재번역</button>
+            <span class="cat-retranslate-close" style="cursor:pointer; opacity:0.6; padding:0 4px;">✕</span>
+        </div>
+    `);
+    $('body').append(toast);
+    toast.find('.cat-retranslate-yes').on('click', () => {
+        toast.remove();
+        const mesBlock = $(`.mes[mesid="${msgId}"]`);
+        const msg = SillyTavern.getContext().chat[msgId];
+        if (msg?.extra) delete msg.extra.display_text;
+        mesBlock.removeAttr('data-cat-translated');
+        processMessageFn(msgId, false, null, false, false);
+    });
+    toast.find('.cat-retranslate-close').on('click', () => toast.remove());
+    setTimeout(() => toast.fadeOut(400, () => toast.remove()), 10000);
+}
+
 export function setupMutationObserver(processMessageFn, revertMessageFn, settings, stContext) {
     const chatContainer = document.getElementById('chat'); if (!chatContainer) { setTimeout(() => setupMutationObserver(processMessageFn, revertMessageFn, settings, stContext), 500); return; }
     const observer = new MutationObserver((mutations) => { let needsButtonInjection = false; for (const mutation of mutations) { if (mutation.addedNodes.length > 0) { needsButtonInjection = true; break; } } if (needsButtonInjection) { injectMessageButtons(processMessageFn, revertMessageFn); injectInputButtons(settings, stContext, processMessageFn); }
@@ -824,7 +856,7 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                         msg.extra.display_text = savedDisplay;
                         mesBlock.attr('data-cat-translated', 'true');
                     } else {
-                        // 🚨 ST 연필 = 원문(영어) 수정 → original_mes 갱신, 번역문 유지
+                        // 🚨 ST 연필 = 원문(영어) 수정 → original_mes 갱신
                         // 🚨 오염 방지: msg.mes가 한국어면 original_mes 덮어쓰기 차단
                         const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
                         if (!msg.extra) msg.extra = {};
@@ -832,16 +864,39 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                             // 한국어가 msg.mes에 들어옴 → 원래 original 보존, 원문 복원
                             msg.extra.original_mes = savedOriginal;
                             msg.mes = savedOriginal;
+                            msg.extra.display_text = savedDisplay;
+                            mesBlock.attr('data-cat-translated', 'true');
                             console.log(`[CAT] 🛡️ 오염 방지: 한국어 차단, 원문 보존 #${msgId}`);
+                            stContext.updateMessageBlock(msgId, msg);
                         } else {
+                            // 영어 원문이 실제로 수정됨 → 모드별 동작
                             msg.extra.original_mes = msg.mes;
-                            console.log(`[CAT] ✏️ ST 연필 원문 수정 → original_mes 갱신 #${msgId}`);
+                            const mode = settings.afterEditMode || 'notify';
+                            console.log(`[CAT] ✏️ ST 연필 원문 수정 → original_mes 갱신 #${msgId} (mode: ${mode})`);
+                            
+                            if (mode === 'auto') {
+                                // 자동 재번역: display_text 제거 후 재번역 트리거
+                                delete msg.extra.display_text;
+                                mesBlock.removeAttr('data-cat-translated');
+                                stContext.updateMessageBlock(msgId, msg);
+                                catNotify(`${getThemeEmoji()} 원문 수정 감지 → 자동 재번역 중...`, "info");
+                                setTimeout(() => processMessageFn(msgId, false, null, false, false), 300);
+                            } else if (mode === 'keep') {
+                                // 기존 번역 유지 (현재 동작)
+                                msg.extra.display_text = savedDisplay;
+                                mesBlock.attr('data-cat-translated', 'true');
+                                stContext.updateMessageBlock(msgId, msg);
+                            } else {
+                                // notify (기본): 알림 + 재번역 버튼
+                                msg.extra.display_text = savedDisplay;
+                                mesBlock.attr('data-cat-translated', 'true');
+                                stContext.updateMessageBlock(msgId, msg);
+                                showRetranslatePrompt(msgId, processMessageFn);
+                            }
                         }
-                        msg.extra.display_text = savedDisplay;
-                        mesBlock.attr('data-cat-translated', 'true');
                     }
                 }
-                stContext.updateMessageBlock(msgId, msg);
+                if (!mesBlock.data('cat-edit-active')) {} // updateMessageBlock는 위 분기에서 처리
             }
         });
     });

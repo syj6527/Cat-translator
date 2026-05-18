@@ -50,7 +50,28 @@ TRANSLATE EVERY piece of human-readable text fearlessly!
 
 [FORMAT PRESERVATION]
 1. TRANSLATE THE WORDS inside all tags, blocks, and brackets. Never leave readable text untranslated.
-2. KEEP THE SYMBOLS. Preserve ALL HTML tags exactly as-is — including standard tags (<memo>, <div>, <small>, <pre>, <code>) AND custom tags (<info_panel>, <status_box>, <character_card>, <chat_box>, ANY tag the user uses). Never strip, modify, or omit any tag. Preserve code block markers (\`\`\`yaml, \`\`\`json, \`\`\`) including their opening and closing fences EXACTLY. Preserve brackets (『』, 【】, <>), and markdown (*bold*, _italic_) in their exact original positions.
+2. KEEP THE SYMBOLS. Preserve ALL HTML tags exactly as-is — including standard tags (<memo>, <div>, <small>, <pre>, <code>) AND custom tags (<info_panel>, <status_box>, <character_card>, <chat_box>, ANY tag the user uses). Never strip, modify, or omit any tag. Preserve brackets (『』, 【】, <>), and markdown (*bold*, _italic_) in their exact original positions.
+
+[CODE BLOCK FENCE - CRITICAL]
+Code block markers (\`\`\`yaml, \`\`\`json, \`\`\`python, \`\`\`) are TRIPLE BACKTICKS followed by an optional language identifier.
+You MUST preserve ALL THREE BACKTICKS (\`\`\`) at the START and at the END of code blocks. 
+NEVER drop the opening \`\`\`yaml or the closing \`\`\`. NEVER replace them with anything else.
+ALSO preserve horizontal rule markers (___, ---) used inside info panels.
+
+WRONG (lost the fence):
+<memo><small>
+[Time: ...]    ← yaml fence missing!
+[Location: ...]
+</small></memo>
+
+CORRECT:
+<memo><small>
+___            ← horizontal rule preserved
+\`\`\`yaml       ← opening fence preserved
+[Time: ...]
+[Location: ...]
+\`\`\`            ← closing fence preserved
+</small></memo>
 3. HTML COMMENTS (<!-- -->): TRANSLATE the human-readable text INSIDE comments. Keep the <!-- --> markers but translate the content between them. These often contain character profiles, status info, and story data that MUST be translated.
 4. PRESERVE spacing, indentation, and line breaks exactly. This is critical for YAML and structured blocks.
 5. PRESERVE ALL CSS properties, color codes (#fff, rgb), classes, and style attributes untouched.
@@ -310,13 +331,18 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
             cleaned = cleaned.replace(/\."\s*\[/g, '. [');
         } else if (bilingualMode === 'off' && cleaned) {
             // 🚨 병기 OFF인데 결과에 병기 흔적 (대사 내 [한국어]) 있으면 정리
+            // 🚨 정리 대상: 짧은 영어 대사 + [한국어 번역] 패턴만 (HTML/yaml/시스템 패널 보호)
             const beforeClean = cleaned;
-            // "영어 텍스트 [한국어]" 형태 → 한국어만 남기기
-            cleaned = cleaned.replace(/"([^"]*?[a-zA-Z][^"]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^"]*?)"/g, '"$2$3"');
-            cleaned = cleaned.replace(/「([^」]*?[a-zA-Z][^」]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^」]*?)」/g, '「$2$3」');
-            cleaned = cleaned.replace(/『([^』]*?[a-zA-Z][^』]*?)\s*\[([^\]]*[가-힣][^\]]*)\]([^』]*?)』/g, '『$2$3』');
-            // 🚨 따옴표 밖 영어 묘사 + [한국어 묘사] 정리는 너무 위험 (코드블록의 ```yaml [Time:...] 등을 망가뜨림)
-            // 따옴표 안 정리만 수행 — 지문은 AI가 정확히 번역하도록 프롬프트에 맡김
+            
+            // 안전 조건:
+            // 1. 따옴표 안이 짧은 텍스트 (200자 미만)
+            // 2. [한국어] 블록이 30자 미만
+            // 3. 주변에 HTML 태그(<...>) 또는 코드블록(```)이 없음
+            const safeBilingualPattern = /"([^"<>`]{1,200}?[a-zA-Z][^"<>`]{1,200}?)\s*\[([^\]<>`]{1,30}[가-힣][^\]<>`]{0,30})\]([^"<>`]{0,50}?)"/g;
+            cleaned = cleaned.replace(safeBilingualPattern, '"$2$3"');
+            cleaned = cleaned.replace(/「([^」<>`]{1,200}?[a-zA-Z][^」<>`]{1,200}?)\s*\[([^\]<>`]{1,30}[가-힣][^\]<>`]{0,30})\]([^」<>`]{0,50}?)」/g, '「$2$3」');
+            cleaned = cleaned.replace(/『([^』<>`]{1,200}?[a-zA-Z][^』<>`]{1,200}?)\s*\[([^\]<>`]{1,30}[가-힣][^\]<>`]{0,30})\]([^』<>`]{0,50}?)』/g, '『$2$3』');
+            
             if (beforeClean !== cleaned) {
                 console.log('[CAT] 🧹 병기 OFF 모드 - 잔존 병기 패턴 자동 정리');
             }
