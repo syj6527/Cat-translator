@@ -327,9 +327,9 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
             if (msg.extra.swipe_translations) { delete msg.extra.swipe_translations; touched = true; }
             if (msg.extra.cat_swipe_id !== undefined) { delete msg.extra.cat_swipe_id; touched = true; }
             
-            // 2. 한국어 오염 검사
-            const mesIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
-            const origIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
+            // 🚨 v1.0.5: 한국어 위주 오염 검사 (영어+한국어 혼합은 정상으로 인식)
+            const mesIsKorean = msg.extra.original_mes && (window._catIsMostlyKorean||(()=>false))(msg.mes);
+            const origIsKorean = msg.extra.original_mes && (window._catIsMostlyKorean||(()=>false))(msg.extra.original_mes);
             
             if (origIsKorean) {
                 // 🚨 영어 원본 자체가 손실됨 - 복구 불가
@@ -926,7 +926,6 @@ function showEditHistoryPopup(msgId) {
         return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
     };
     const truncate = (s, n) => s.length > n ? s.substring(0, n) + '…' : s;
-    
     let historyHtml;
     if (history.length === 0) {
         historyHtml = `<div class="cat-edit-history-empty">아직 수정 히스토리가 없어요.<br><span style="font-size:0.85em; opacity:0.6;">원문을 ✏️로 수정하면 이전 버전이 여기 보관돼요. (최근 3개)</span></div>`;
@@ -934,18 +933,18 @@ function showEditHistoryPopup(msgId) {
         // 최신부터 표시 (히스토리 배열은 오래된 것이 앞 → 뒤집어서 표시)
         const reversed = history.map((entry, originalIdx) => ({ ...entry, originalIdx })).reverse();
         historyHtml = reversed.map((entry, displayIdx) => {
-            const preview = truncate(entry.original, 250);
+            const preview = truncate(entry.original, 2000);
             return `
                 <div class="cat-edit-history-item">
                     <div class="cat-edit-history-meta">#${reversed.length - displayIdx} · ${fmtTime(entry.timestamp)}</div>
                     <div class="cat-edit-history-text">${_catEscapeHtml(preview)}</div>
-                    <button class="cat-edit-history-restore menu_button" data-index="${entry.originalIdx}">↩️ 이걸로 되돌리기</button>
+                    <button type="button" class="cat-edit-history-restore" data-index="${entry.originalIdx}" style="display:inline-block; width:auto; min-width:0; white-space:nowrap; word-break:keep-all; writing-mode:horizontal-tb; padding:6px 14px; cursor:pointer; background:var(--ca-bg,#444); border:1px solid var(--ca-accent,#888); color:var(--SmartThemeBodyColor,#fff); border-radius:6px; font-size:0.88em;">↩️ 이걸로 되돌리기</button>
                 </div>
             `;
         }).join('');
     }
     
-    const currentPreview = truncate(current, 250);
+    const currentPreview = truncate(current, 2000);
     
     const popup = $(`
         <div class="cat-edit-history-overlay" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:99998; display:flex; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
@@ -965,13 +964,34 @@ function showEditHistoryPopup(msgId) {
     `);
     
     $('body').append(popup);
-    popup.find('.cat-edit-history-close').on('click', () => popup.remove());
-    popup.on('click', function(e) {
-        if (e.target === this) popup.remove();
+    
+    const closePopup = () => {
+        popup.remove();
+        $(document).off('keydown.catedithistory');
+    };
+    
+    popup.find('.cat-edit-history-close').on('click touchend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closePopup();
+    });
+    // overlay (popup 자체 div) 클릭/터치하면 닫기 — popup 안 내용 클릭은 stopPropagation
+    popup.on('click touchend', function(e) {
+        if (e.target === this) {
+            e.preventDefault();
+            closePopup();
+        }
+    });
+    popup.find('.cat-edit-history-popup').on('click touchend', function(e) {
+        e.stopPropagation();
+    });
+    // ESC 키로 닫기
+    $(document).on('keydown.catedithistory', function(e) {
+        if (e.key === 'Escape') closePopup();
     });
     popup.find('.cat-edit-history-restore').on('click', function() {
         const idx = parseInt($(this).attr('data-index'));
-        popup.remove();
+        closePopup();
         if (typeof window._catRestoreFromHistory === 'function') {
             window._catRestoreFromHistory(msgId, idx);
         } else {
@@ -1037,9 +1057,28 @@ function showManualOriginalPopup(msgId) {
         </div>
     `);
     $('body').append(popup);
-    popup.find('.cat-manual-close, .cat-manual-cancel').on('click', () => popup.remove());
-    popup.on('click', function(e) {
-        if (e.target === this) popup.remove();
+    
+    const closeManual = () => {
+        popup.remove();
+        $(document).off('keydown.catmanual');
+    };
+    
+    popup.find('.cat-manual-close, .cat-manual-cancel').on('click touchend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeManual();
+    });
+    popup.on('click touchend', function(e) {
+        if (e.target === this) {
+            e.preventDefault();
+            closeManual();
+        }
+    });
+    popup.find('.cat-manual-popup').on('click touchend', function(e) {
+        e.stopPropagation();
+    });
+    $(document).on('keydown.catmanual', function(e) {
+        if (e.key === 'Escape') closeManual();
     });
     popup.find('.cat-manual-submit').on('click', () => {
         const val = (popup.find('.cat-manual-textarea').val() || '').trim();
@@ -1047,7 +1086,7 @@ function showManualOriginalPopup(msgId) {
             catNotify(`${getThemeEmoji()} 영어 원본을 입력해주세요.`, "warning");
             return;
         }
-        popup.remove();
+        closeManual();
         if (typeof window._catSetManualOriginal === 'function') {
             window._catSetManualOriginal(msgId, val);
         } else {
@@ -1123,8 +1162,8 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 mesBlock.removeData('cat-edit-display').removeData('cat-edit-original');
                 
                 if (savedDisplay && savedOriginal) {
-                    // msg.mes가 한국어로 오염되었으면 원문 복원만 (자동 재번역은 index.js handleEditSaved가 담당)
-                    const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+                    // 🚨 v1.0.5: 한국어 위주 오염만 차단 (영어+한국어 혼합 통과)
+                    const hasKorean = (window._catIsMostlyKorean||(()=>false))(msg.mes);
                     if (hasKorean) {
                         if (!msg.extra) msg.extra = {};
                         msg.extra.original_mes = savedOriginal;

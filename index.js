@@ -2,13 +2,23 @@
 // 🐱 Translator v1.0.5
 // ============================================================
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
-import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey, isMostlyKorean } from './utils.js';
+import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey } from './utils.js';
 import { initCache, deleteCached } from './cache.js';
 import { fetchTranslation, gatherContextMessages } from './translator.js';
 import { setupSettingsPanel, collectSettings, updateCacheStats, injectMessageButtons, injectInputButtons, setupDragDictionary, setupMutationObserver, showHistoryPopup, applyTheme, setSuppressAutoSave, clearPendingAutoSave } from './ui.js';
 
 const EXT_NAME = "cat-translator";
 const stContext = getContext();
+
+// 🚨 v1.0.5: 한국어 위주 텍스트 판정 (영어+한국어 혼합 텍스트는 false 반환)
+// utils.js 의존성 없이 작동하도록 로컬 정의 + window 노출 (ui.js에서도 참조)
+function isMostlyKorean(text) {
+    if (!text || text.length < 10) return false;
+    const koreanCount = (text.match(/[가-힣]/g) || []).length;
+    const englishCount = (text.match(/[a-zA-Z]/g) || []).length;
+    return koreanCount > englishCount && koreanCount > 10;
+}
+window._catIsMostlyKorean = isMostlyKorean;
 
 const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', afterEditMode: 'notify', promptPresets: {}, charPresetMap: {} };
 // 베타 → 정식 설정 마이그레이션 (기존 사용자 설정 보존)
