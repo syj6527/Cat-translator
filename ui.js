@@ -1136,10 +1136,36 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 if (msg.extra?.display_text) mesBlock.data('cat-edit-display', msg.extra.display_text);
                 if (msg.extra?.original_mes) mesBlock.data('cat-edit-original', msg.extra.original_mes);
                 
+                // 🚨 v1.0.5: 유저 메시지의 경우 textarea에 원본 강제 삽입
+                // (인풋은 msg.mes가 번역문으로 덮어씌워져서 ✏️ 누르면 한국어가 뜨는 문제 해결)
+                // ST가 비동기로 textarea 값을 set하는 흐름 대응 — 3단계 시도
+                if (msg.is_user && msg.extra?.original_mes && !mesBlock.data('cat-edit-type')) {
+                    const targetOriginal = msg.extra.original_mes;
+                    const forceOriginal = (label) => {
+                        const $ta = mesBlock.find('textarea.edit_textarea:visible, textarea.mes_edit_textarea:visible').first();
+                        if ($ta.length === 0) {
+                            console.log(`[CAT] ⚠️ ${label} #${msgId}: textarea 없음`);
+                            return;
+                        }
+                        const currentVal = $ta.val();
+                        console.log(`[CAT] 📝 ${label} #${msgId}: textarea 현재값="${(currentVal||'').substring(0,30)}..." 목표="${targetOriginal.substring(0,30)}..."`);
+                        if (currentVal !== targetOriginal) {
+                            setTextareaValue($ta[0], targetOriginal);
+                            // capturedText Map도 갱신 (저장 시 잘못된 캡처 방지)
+                            const msgIdStr = String(msgId);
+                            window._catCapturedText = window._catCapturedText || new Map();
+                            window._catCapturedText.set(msgIdStr, targetOriginal);
+                        }
+                    };
+                    forceOriginal('편집진입 즉시');
+                    setTimeout(() => forceOriginal('편집진입 +50ms'), 50);
+                    setTimeout(() => forceOriginal('편집진입 +250ms'), 250);
+                }
+                
                 // 🚨 textarea에 직접 input 리스너 바인딩 (글로벌 Map에 저장)
                 const msgIdStr = String(msgId);
                 window._catCapturedText = window._catCapturedText || new Map();
-                window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값
+                window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값 (강제 삽입 후 값)
                 editArea.off('input.catedit keyup.catedit').on('input.catedit keyup.catedit', function() {
                     const val = $(this).val();
                     if (val) {
