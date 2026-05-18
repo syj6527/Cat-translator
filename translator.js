@@ -179,7 +179,7 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
         return null;
     }
 
-    const { forceLang = null, prevTranslation = null, contextMessages = [], abortSignal = null, silent = false } = options;
+    const { forceLang = null, prevTranslation = null, contextMessages = [], abortSignal = null, silent = false, forceFresh = false } = options;
     if (!text || text.trim() === "") return null;
 
     let targetLang; let isToEnglish;
@@ -210,7 +210,7 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
         }
     }
 
-    if (!prevTranslation) {
+    if (!prevTranslation && !forceFresh) {
         const modelKey = getCacheModelKey(settings);
         const cached = await getCached(text, targetLang, modelKey);
         if (cached) {

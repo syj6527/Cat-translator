@@ -95,6 +95,18 @@ export async function getCached(originalText, targetLang, modelKey = 'default') 
     return null;
 }
 
+// ─── 캐시 삭제 (특정 항목) ──────────────────────────────────────
+export async function deleteCached(originalText, targetLang, modelKey = 'default') {
+    if (!db) return;
+    const normalized = normalizeText(originalText);
+    const key = `${normalized}::${targetLang}::${modelKey}`;
+    try {
+        const tx = db.transaction(STORE_TRANSLATIONS, 'readwrite');
+        const store = tx.objectStore(STORE_TRANSLATIONS);
+        await promisifyRequest(store.delete(key));
+    } catch (e) { /* ignore */ }
+}
+
 // ─── 캐시 저장 (모델별 분리) ──────────────────────────────────────
 export async function setCached(originalText, targetLang, translated, thought = null, modelKey = 'default') {
     if (!db) return;

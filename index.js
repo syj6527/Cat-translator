@@ -3,7 +3,7 @@
 // ============================================================
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey } from './utils.js';
-import { initCache } from './cache.js';
+import { initCache, deleteCached } from './cache.js';
 import { fetchTranslation, gatherContextMessages } from './translator.js';
 import { setupSettingsPanel, collectSettings, updateCacheStats, injectMessageButtons, injectInputButtons, setupDragDictionary, setupMutationObserver, showHistoryPopup, applyTheme, setSuppressAutoSave, clearPendingAutoSave } from './ui.js';
 
@@ -187,14 +187,14 @@ async function processMessage(id, isInput = false, abortSignal = null, silent = 
     } finally { clearTimeout(glowTimeout); if (!historyShown) stopGlow(); }
 }
 
-async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTranslation, abortSignal, silent = false) {
+async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTranslation, abortSignal, silent = false, forceFresh = false) {
     const source = msg.extra?.original_mes || textToTranslate;
     const detected = detectLanguageDirection(source, settings);
     const forceLang = detected.targetLang;
     const contextRange = parseInt(settings.contextRange) || 1;
     const contextMsgs = gatherContextMessages(msgId, stContext, contextRange);
 
-    const result = await fetchTranslation(textToTranslate, settings, stContext, { forceLang, prevTranslation: isInput ? (msg.extra?.original_mes ? msg.mes : null) : prevTranslation, contextMessages: contextMsgs, abortSignal, silent });
+    const result = await fetchTranslation(textToTranslate, settings, stContext, { forceLang, prevTranslation: isInput ? (msg.extra?.original_mes ? msg.mes : null) : prevTranslation, contextMessages: contextMsgs, abortSignal, silent, forceFresh });
 
     if (result && result.text && result.text.trim() && result.text !== textToTranslate) {
         if (!msg.extra) msg.extra = {};
@@ -388,6 +388,10 @@ jQuery(async () => {
             $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
             stContext.updateMessageBlock(id, msg);
             console.log(`[CAT] 🔄 자동 재번역 트리거 #${id}`);
+            // 🚨 캐시 우회: 새 원문에 대한 캐시 삭제 (이전 번역 재사용 방지)
+            const modelKey = getCacheModelKey(settings);
+            const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
+            deleteCached(msg.mes, targetLang, modelKey);
             setTimeout(() => processMessage(id, false, null, false, false), 300);
         } else if (mode === 'notify') {
             // notify 모드는 옵저버에서 토스트 처리 (중복 방지)
@@ -575,6 +579,10 @@ jQuery(async () => {
                 $(`.mes[mesid="${idx}"]`).removeAttr('data-cat-translated');
                 stContext.updateMessageBlock(idx, msg);
                 catNotify(`${getThemeEmoji()} 원문 수정 감지 → 자동 재번역 중...`, "info");
+                // 🚨 캐시 우회: 새 원문에 대한 캐시 삭제 (이전 번역 재사용 방지)
+                const modelKey = getCacheModelKey(settings);
+                const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
+                deleteCached(msg.mes, targetLang, modelKey);
                 setTimeout(() => processMessage(idx, false, null, false, false), 300);
             } else if (mode === 'notify') {
                 stContext.updateMessageBlock(idx, msg);
