@@ -882,7 +882,6 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 if (msg.extra?.original_mes) mesBlock.data('cat-edit-original', msg.extra.original_mes);
                 
                 // 🚨 textarea에 직접 input 리스너 바인딩 (글로벌 Map에 저장)
-                // 위임 이벤트는 ST가 가로챌 수 있어서 직접 바인딩이 가장 확실
                 const msgIdStr = String(msgId);
                 window._catCapturedText = window._catCapturedText || new Map();
                 window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값
@@ -890,11 +889,30 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                     const val = $(this).val();
                     if (val) {
                         window._catCapturedText.set(msgIdStr, val);
-                        console.log(`[CAT] 📝 textarea 직접 캡처 #${msgIdStr}: ${val.substring(0, 40)}...`);
                     }
                 });
-                // 🚨 ST 연필 → 원문(영어) 그대로 표시 (ST 기본 동작 유지)
-                // 🚨 🐟/🍖 팝업에서 진입 → _editWatcher가 처리하므로 여기서 안 건드림
+                
+                // 🚨 ✓ 버튼에 직접 클릭 핸들러 바인딩 (위임 이벤트 백업)
+                // 모바일 ST에서 $(document).on이 안 잡히는 케이스 대응
+                const $doneBtn = mesBlock.find('.mes_edit_done, .mes_edit_save, .edit_mes_save, [class*="mes_edit_done"]').first();
+                if ($doneBtn.length > 0 && !$doneBtn.data('cat-direct-bound')) {
+                    $doneBtn.data('cat-direct-bound', true);
+                    $doneBtn.on('click.catdirect', function() {
+                        const $ta = mesBlock.find('textarea').first();
+                        if ($ta.length > 0 && $ta.val()) {
+                            window._catCapturedText.set(msgIdStr, $ta.val());
+                        }
+                        const captured = window._catCapturedText.get(msgIdStr);
+                        console.log(`[CAT] ✓ 직접 핸들러 #${msgIdStr} 캡처: ${captured ? captured.substring(0, 50) : '없음'}`);
+                        catNotify(`${getThemeEmoji ? getThemeEmoji() : '🐱'} 편집 저장 #${msgIdStr}`, "info");
+                        // index.js의 handleEditSaved를 window에서 호출
+                        setTimeout(() => {
+                            if (typeof window._catHandleEditSaved === 'function') {
+                                window._catHandleEditSaved(msgIdStr, captured);
+                            }
+                        }, 500);
+                    });
+                }
             } else if (editArea.length === 0 && mesBlock.data('cat-edit-active')) {
                 // 편집 모드 종료 - 백업 데이터만 정리 (실제 처리는 index.js handleEditSaved + 폴링이 담당)
                 mesBlock.removeData('cat-edit-active');

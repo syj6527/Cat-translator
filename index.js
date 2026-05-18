@@ -442,6 +442,10 @@ jQuery(async () => {
             setTimeout(() => processMessage(id, false, null, false, false), 300);
         }
     }
+    
+    // 🚨 ui.js의 직접 핸들러에서 호출할 수 있도록 window에 노출
+    window._catHandleEditSaved = handleEditSaved;
+    
     const bodyObserver = new MutationObserver(() => { applyTheme(getCurrentTheme()); }); bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // 🚨 캐릭터 전환 시 번역 프롬프트 자동 로드
     stContext.eventSource.on(stContext.event_types.CHAT_CHANGED, () => {
