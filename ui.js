@@ -83,19 +83,19 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                 </select>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <div class="cat-setting-row" style="flex:1; min-width:180px; margin-bottom:0;">
-                    <label>원문 수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(봇 ✏️)</span></label>
-                    <select id="ct-after-edit" class="text_pole">
-                        <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역 버튼</option>
+                <div class="cat-setting-row" style="flex:1 1 200px; min-width:0; margin-bottom:0; box-sizing:border-box;">
+                    <label>수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(✏️ 동작)</span></label>
+                    <select id="ct-after-edit" class="text_pole" style="width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
+                        <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역</option>
                         <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
-                        <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 번역 유지</option>
+                        <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 유지</option>
                     </select>
                 </div>
-                <div class="cat-setting-row" style="flex:1; min-width:180px; margin-bottom:0;">
-                    <label>유저 인풋 재번역 <span style="font-size:0.8em; opacity:0.6;">(유저 ✏️)</span></label>
-                    <select id="ct-user-input-mode" class="text_pole">
+                <div class="cat-setting-row" style="flex:1 1 200px; min-width:0; margin-bottom:0; box-sizing:border-box;">
+                    <label>한국어 수정 허용 <span style="font-size:0.8em; opacity:0.6;">(봇/유저)</span></label>
+                    <select id="ct-user-input-mode" class="text_pole" style="width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
                         <option value="english-only" ${(!settings.userInputMode || settings.userInputMode === 'english-only') ? 'selected' : ''}>영어 원문만 (기본)</option>
-                        <option value="bidirectional" ${settings.userInputMode === 'bidirectional' ? 'selected' : ''}>양방향 (한↔영)</option>
+                        <option value="bidirectional" ${settings.userInputMode === 'bidirectional' ? 'selected' : ''}>한-영병기</option>
                     </select>
                 </div>
             </div>
@@ -557,11 +557,19 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
             }
             enterTranslatedEdit(mesBlock, msg, msgId);
         });
-        // 🚨 v1.0.5: 🕓 히스토리 버튼 클릭
+    }
+    // 🚨 v1.0.5: 🕓 히스토리 버튼 클릭 — 별도 플래그로 분리 (v1.0.4 캐싱과 무관하게 등록 보장)
+    if (!window._catHistoryBtnDelegated) {
+        window._catHistoryBtnDelegated = true;
         $(document).on('click', '.cat-mes-history-btn', function (e) {
             e.stopPropagation();
             const msgId = parseInt($(this).data('mesid') || $(this).closest('.mes').attr('mesid'));
-            if (!isNaN(msgId)) showEditHistoryPopup(msgId);
+            console.log(`[CAT] 🕓 히스토리 버튼 클릭 #${msgId}`);
+            if (!isNaN(msgId) && typeof showEditHistoryPopup === 'function') {
+                showEditHistoryPopup(msgId);
+            } else {
+                console.warn(`[CAT] 🕓 showEditHistoryPopup 함수 없음 또는 msgId 잘못됨`);
+            }
         });
     }
 }
@@ -1172,8 +1180,9 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 mesBlock.removeData('cat-edit-display').removeData('cat-edit-original');
                 
                 if (savedDisplay && savedOriginal) {
-                    // 🚨 v1.0.5: 한국어 위주 오염은 봇 메시지에만 차단 (유저 메시지는 한국어 입력이 정상)
-                    const hasKorean = !msg.is_user && (window._catIsMostlyKorean||(()=>false))(msg.mes);
+                    // 🚨 v1.0.5: 한-영병기 모드면 한국어 차단 패스 (봇 메시지도 한국어 수정 허용)
+                    const allowKorean = (settings?.userInputMode || 'english-only') === 'bidirectional';
+                    const hasKorean = !msg.is_user && !allowKorean && (window._catIsMostlyKorean||(()=>false))(msg.mes);
                     if (hasKorean) {
                         if (!msg.extra) msg.extra = {};
                         msg.extra.original_mes = savedOriginal;

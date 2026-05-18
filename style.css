@@ -104,3 +104,121 @@
     .cat-input-icon .cat-emoji-icon { font-size: 1em; }
     #send_but { margin-left: 2px !important; }
 }
+
+/* ============================================================
+   v1.0.5: 수정 히스토리 / 손상 복구 UI
+   ============================================================ */
+.cat-mes-history-btn { cursor: pointer; margin-left: 4px; transition: opacity 0.2s, transform 0.2s; display: inline-block; }
+.cat-mes-history-btn:hover { transform: scale(1.18); }
+
+/* 🚨 overlay는 ST 모바일 transform/positioning 충돌 회피를 위해 무조건 화면 전체 강제 */
+.cat-edit-history-overlay,
+.cat-manual-overlay {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    z-index: 2147483646 !important;
+    overflow: hidden !important;
+    animation: cat-fade-in 0.18s ease;
+    /* flex 의존 제거 — popup 자체 positioning으로 화면 안 보장 */
+}
+/* 🚨 popup은 absolute로 top 고정 → flex 의존 없이 화면 안에 항상 위치 */
+.cat-edit-history-popup, .cat-manual-popup {
+    position: absolute !important;
+    top: 4vh !important;
+    top: 4dvh !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: calc(100vw - 24px) !important;
+    max-width: 540px !important;
+    max-height: 92vh !important;
+    max-height: 92dvh !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+    animation: cat-pop-in 0.22s ease;
+}
+
+/* 🚨 헤더 sticky: 스크롤해도 ✕ 버튼이 항상 보이게 */
+.cat-edit-history-header {
+    position: sticky;
+    top: 0;
+    background: var(--SmartThemeBlurTintColor, #222);
+    padding: 12px 0 10px;
+    margin: -4px 0 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    z-index: 2;
+}
+.cat-edit-history-close, .cat-manual-close {
+    font-size: 1.6em !important;
+    padding: 4px 10px !important;
+    line-height: 1 !important;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: rgba(255,255,255,0.2);
+}
+
+.cat-edit-history-item { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; transition: background 0.15s, border-color 0.15s; text-align: left; }
+.cat-edit-history-item:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.16); }
+.cat-edit-history-meta { font-size: 0.78em; opacity: 0.6; margin-bottom: 5px; }
+.cat-edit-history-text { font-size: 0.92em; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin-bottom: 8px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+.cat-edit-history-current { background: rgba(255,255,255,0.05); padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--ca-accent, #ff69b4); }
+
+/* 🚨 button 세로 글자 픽스 — specificity 최강화 + menu_button override */
+.cat-edit-history-popup button.cat-edit-history-restore,
+button.cat-edit-history-restore,
+.cat-edit-history-restore {
+    display: inline-block !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    word-wrap: normal !important;
+    overflow-wrap: normal !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    text-align: center !important;
+    padding: 6px 14px !important;
+    font-size: 0.88em !important;
+    line-height: 1.4 !important;
+    cursor: pointer;
+}
+.cat-edit-history-empty { text-align: center; opacity: 0.6; padding: 28px 16px; font-size: 0.95em; line-height: 1.6; }
+
+/* 손상 복구 토스트 */
+.cat-damaged-toast { animation: cat-slide-up 0.25s ease; }
+.cat-damaged-toast button { cursor: pointer; }
+
+/* 수동 입력 팝업 */
+.cat-manual-textarea { font-family: monospace; font-size: 0.92em; line-height: 1.5; min-height: 140px; }
+
+@keyframes cat-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cat-pop-in { from { opacity: 0; transform: translateY(-8px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes cat-slide-up { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+@media (max-width: 768px) {
+    .cat-edit-history-popup, .cat-manual-popup {
+        width: 96vw !important;
+        max-width: 96vw !important;
+        max-height: 85vh !important;
+        max-height: 85dvh !important;
+        padding: 12px !important;
+        box-sizing: border-box !important;
+    }
+    .cat-edit-history-text { max-height: 220px; font-size: 0.88em; }
+    .cat-damaged-toast { font-size: 0.88em; bottom: 70px !important; padding: 8px 10px !important; max-width: 95vw !important; }
+    .cat-edit-history-popup button.cat-edit-history-restore,
+    button.cat-edit-history-restore,
+    .cat-edit-history-restore {
+        font-size: 0.95em !important;
+        padding: 8px 18px !important;
+        min-height: 36px !important;
+    }
+    .cat-edit-history-close, .cat-manual-close {
+        font-size: 1.8em !important;
+        padding: 6px 14px !important;
+    }
+}

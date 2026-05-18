@@ -422,10 +422,11 @@ jQuery(async () => {
         // (이하는 봇 메시지 처리 — 기존 동작 유지)
         // 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
         let newOriginal = msg.mes;
-        // 🚨 v1.0.5: 비율 기반 검사 (영어+한국어 혼합 텍스트는 한국어로 오인 안 함)
-        const capturedIsKorean = capturedText && isMostlyKorean(capturedText);
-        const mesIsKorean = isMostlyKorean(msg.mes);
-        const origIsKorean = isMostlyKorean(msg.extra.original_mes);
+        // 🚨 v1.0.5: 한-영병기 모드면 한국어 차단 모두 패스
+        const allowKorean = (settings.userInputMode || 'english-only') === 'bidirectional';
+        const capturedIsKorean = !allowKorean && capturedText && isMostlyKorean(capturedText);
+        const mesIsKorean = !allowKorean && isMostlyKorean(msg.mes);
+        const origIsKorean = !allowKorean && isMostlyKorean(msg.extra.original_mes);
         
         // 🚨 영어 원본 자체가 손상된 경우 (original_mes가 한국어)
         if (origIsKorean) {

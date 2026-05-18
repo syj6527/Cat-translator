@@ -344,3 +344,13 @@ export function analyzeSpeechPatterns(contextMessages) {
     
     return patterns.length > 0 ? patterns.join('\n') : null;
 }
+
+// 🚨 v1.0.5: 한국어 위주 텍스트 판정 (영어+한국어 혼합 케이스 통과)
+// 영어 본문에 한국어 인포블록/단어/인용이 섞인 경우는 false 반환.
+// 한국어 본문에 영어가 살짝 섞인 경우만 true (=한국어 우세).
+export function isMostlyKorean(text) {
+    if (!text || text.length < 10) return false;
+    const koreanCount = (text.match(/[가-힣]/g) || []).length;
+    const englishCount = (text.match(/[a-zA-Z]/g) || []).length;
+    return koreanCount > englishCount && koreanCount > 10;
+}
