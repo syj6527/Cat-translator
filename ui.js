@@ -314,23 +314,50 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     $('#ct-clean-chat').on('click', () => {
         const ctx = SillyTavern?.getContext?.();
         if (!ctx?.chat) { catNotify(`${getThemeEmoji()} 채팅을 찾을 수 없어요`, "warning"); return; }
-        if (!confirm('현재 채팅의 모든 메시지에서 swipe 번역 캐시 + 동기화 정보를 정리합니다.\n\n표시되는 번역(display_text)은 유지되지만, 다른 스와이프의 저장된 번역들은 삭제됩니다.\n\n계속하시겠어요?')) return;
+        if (!confirm('현재 채팅의 모든 메시지에서 swipe 번역 캐시 + 동기화 정보 + 편집 상태를 정리합니다.\n\n표시되는 번역(display_text)은 유지되지만, 다른 스와이프의 저장된 번역들은 삭제됩니다.\n\n계속하시겠어요?')) return;
         
         let cleaned = 0;
-        ctx.chat.forEach((msg) => {
+        ctx.chat.forEach((msg, i) => {
             if (!msg?.extra) return;
             let touched = false;
+            
+            // 1. swipe_translations 정리
             if (msg.extra.swipe_translations) { delete msg.extra.swipe_translations; touched = true; }
             if (msg.extra.cat_swipe_id !== undefined) { delete msg.extra.cat_swipe_id; touched = true; }
-            // 한국어가 msg.mes에 들어간 오염 케이스 자동 복구
+            
+            // 2. 한국어 오염 복구 (msg.mes에 한국어가 들어간 경우)
             if (msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10) {
                 msg.mes = msg.extra.original_mes;
                 touched = true;
             }
+            
+            // 3. DOM 측 정리: mesBlock의 jQuery data + 편집 상태 속성
+            const $mes = $(`.mes[mesid="${i}"]`);
+            if ($mes.length > 0) {
+                $mes.removeData('cat-edit-active')
+                    .removeData('cat-edit-display')
+                    .removeData('cat-edit-original')
+                    .removeData('cat-edit-type')
+                    .removeData('cat-captured-text')
+                    .removeData('cat-last-textarea');
+                // 글로우 stuck 정리
+                $mes.find('.cat-glow-anim').removeClass('cat-glow-anim');
+            }
+            
             if (touched) cleaned++;
         });
+        
+        // 4. 글로벌 캡처 Map 초기화
+        if (window._catCapturedText) window._catCapturedText.clear();
+        
         try { ctx.saveChat(); } catch (e) {}
-        catNotify(`${getThemeEmoji()} ${cleaned}개 메시지 정리 완료! 이제 자동 재번역이 작동해요.`, "success");
+        catNotify(`${getThemeEmoji()} ${cleaned}개 메시지 정리 완료!`, "success");
+        // 안내: 그래도 안 되면 새로고침 권장
+        setTimeout(() => {
+            if (confirm('정리 완료! 그래도 자동 재번역이 안 되면 페이지 새로고침을 권장해요. 지금 새로고침할까요?')) {
+                location.reload();
+            }
+        }, 1000);
     });
     
     $('#ct-reset-settings').on('click', () => {
