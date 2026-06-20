@@ -663,6 +663,7 @@ jQuery(async () => {
 function setupChatPreviewTranslation() {
     const _previewProcessed = new WeakSet(); // 이미 처리한 DOM 노드
     let _queueProcessing = false;
+    let _headerButtonInjected = false;
     
     // 후보 셀렉터들 (ST 버전마다 다를 수 있음)
     const PREVIEW_SELECTORS = [
@@ -712,12 +713,12 @@ function setupChatPreviewTranslation() {
     }
     
     // 미리보기 한 개 번역
-    async function translatePreview(el, text) {
-        if (_previewProcessed.has(el)) return;
+    async function translatePreview(el, text, modeOverride = null) {
+        if (_previewProcessed.has(el)) return null;
         _previewProcessed.add(el);
         
-        const mode = settings.previewTranslate || 'off';
-        if (mode === 'off') return;
+        const mode = modeOverride || settings.previewTranslate || 'off';
+        if (mode === 'off') return null;
         
         const targetLang = settings.targetLang || 'Korean';
         const modelKey = getCacheModelKey(settings);
@@ -736,11 +737,11 @@ function setupChatPreviewTranslation() {
                 el.style.opacity = '1';
                 el.title = `🐱 원문: ${text.substring(0, 100)}...`;
                 console.log(`[CAT] 📁 미리보기 캐시 히트`);
-                return;
+                return 'cached';
             }
             
             // 2. 캐시 없음 → mode 'auto'일 때만 API 호출
-            if (mode !== 'auto') return;
+            if (mode !== 'auto') return null;
             
             // 시각적 피드백
             el.style.opacity = '0.5';
@@ -761,16 +762,19 @@ function setupChatPreviewTranslation() {
                 el.style.fontStyle = 'normal';
                 el.title = `🐱 원문: ${text.substring(0, 100)}...`;
                 console.log(`[CAT] 📁 미리보기 번역 완료`);
+                return 'translated';
             } else {
                 el.style.opacity = '1';
                 el.style.fontStyle = 'normal';
-                _previewProcessed.delete(el); // 실패하면 다시 시도 가능
+                _previewProcessed.delete(el);
+                return null;
             }
         } catch (e) {
             console.warn(`[CAT] 미리보기 번역 실패:`, e);
             el.style.opacity = '1';
             el.style.fontStyle = 'normal';
             _previewProcessed.delete(el);
+            return null;
         }
     }
     
@@ -808,19 +812,26 @@ function setupChatPreviewTranslation() {
     }
     
     // 큐에 쌓인 미리보기 순차 처리 (rate limit 방지)
-    async function processQueue() {
-        if (_queueProcessing) return;
+    async function processQueue(force = false) {
+        if (_queueProcessing) {
+            catNotify(`${getThemeEmoji()} 이미 처리 중이에요. 잠시 기다려주세요`, "info");
+            return;
+        }
         
         const translateMode = settings.previewTranslate || 'off';
         const cleanupMode = settings.previewCleanup || 'off';
         
-        // 둘 다 off면 아무것도 안 함
-        if (translateMode === 'off' && cleanupMode === 'off') return;
+        // 강제 실행 모드: 옵션 OFF여도 정리는 무조건 실행
+        if (!force && translateMode === 'off' && cleanupMode === 'off') return;
         
         _queueProcessing = true;
+        let cleanupCount = 0;
+        let translateCount = 0;
+        
         try {
             // 🚨 마크업 정리는 모든 미리보기 (영문/한국어) 대상
-            if (cleanupMode === 'on') {
+            // force 또는 cleanupMode === 'on'
+            if (force || cleanupMode === 'on') {
                 for (const selector of PREVIEW_SELECTORS) {
                     try {
                         document.querySelectorAll(selector).forEach(el => {
@@ -836,6 +847,7 @@ function setupChatPreviewTranslation() {
                                 el.textContent = cleaned;
                                 el.dataset.catCleanupDone = 'true';
                                 el.title = `🐱 원본 보기 (정리 전)`;
+                                cleanupCount++;
                             }
                         });
                     } catch (e) {}
@@ -843,34 +855,84 @@ function setupChatPreviewTranslation() {
             }
             
             // 번역 처리 (영문만)
-            if (translateMode !== 'off') {
+            // force 모드 시 settings.previewTranslate가 'off'면 'cache'로 처리
+            const effectiveTranslateMode = (force && translateMode === 'off') ? 'cache' : translateMode;
+            if (effectiveTranslateMode !== 'off') {
                 const elements = findPreviewElements();
                 if (elements.length > 0) {
                     console.log(`[CAT] 📁 미리보기 ${elements.length}개 발견 (번역 대상)`);
                     
                     // 1초 간격으로 순차 처리 (API rate limit 방지)
                     for (const { el, text } of elements) {
-                        await translatePreview(el, text);
+                        const result = await translatePreview(el, text, effectiveTranslateMode);
+                        if (result === 'translated' || result === 'cached') translateCount++;
                         await new Promise(r => setTimeout(r, 800)); // 0.8초 간격
                     }
                 }
+            }
+            
+            // 강제 모드면 결과 알림
+            if (force) {
+                const msgs = [];
+                if (cleanupCount > 0) msgs.push(`🧹 정리 ${cleanupCount}개`);
+                if (translateCount > 0) msgs.push(`📁 번역 ${translateCount}개`);
+                if (msgs.length === 0) msgs.push('처리할 미리보기가 없어요 (이미 정리됐거나 영문이 없음)');
+                catNotify(`${getThemeEmoji()} ${msgs.join(' / ')}`, "success");
             }
         } finally {
             _queueProcessing = false;
         }
     }
     
+    // 🚨 헤더에 수동 처리 버튼 주입
+    function injectHeaderButton() {
+        if (_headerButtonInjected && document.querySelector('#cat-preview-manual-btn')) return;
+        
+        const headers = document.querySelectorAll('#selectChatPopupHeader, [name="selectChatPopupHeader"], [id*="selectChatPopup"][class*="header"]');
+        if (headers.length === 0) return;
+        
+        for (const header of headers) {
+            // 이미 추가됐으면 스킵
+            if (header.querySelector('#cat-preview-manual-btn')) continue;
+            
+            const btn = document.createElement('div');
+            btn.id = 'cat-preview-manual-btn';
+            btn.className = 'menu_button menu_button_icon interactable';
+            btn.setAttribute('role', 'button');
+            btn.setAttribute('tabindex', '0');
+            btn.style.cssText = 'display:flex; align-items:center; gap:5px;';
+            btn.innerHTML = `<span style="font-size:16px;">${getThemeEmoji ? getThemeEmoji() : '🐱'}</span><span>미리보기 처리</span>`;
+            btn.title = '마크업 정리 + 영문 번역 (강제 실행)';
+            
+            btn.addEventListener('click', () => processQueue(true));
+            
+            // 검색바 앞에 삽입
+            const searchBar = header.querySelector('#select_chat_search, [id*="search"]');
+            if (searchBar) {
+                header.insertBefore(btn, searchBar);
+            } else {
+                header.appendChild(btn);
+            }
+            
+            _headerButtonInjected = true;
+            console.log(`[CAT] 📁 미리보기 처리 버튼 주입 완료`);
+        }
+    }
+    
     // MutationObserver: 채팅 팝업 등장 감지
     const previewObserver = new MutationObserver(() => {
+        // 🚨 버튼은 옵션 OFF여도 항상 주입 (사용자가 수동 실행 가능)
+        injectHeaderButton();
+        
         const translateMode = settings.previewTranslate || 'off';
         const cleanupMode = settings.previewCleanup || 'off';
         if (translateMode === 'off' && cleanupMode === 'off') return;
         // debounce - 500ms 후 한 번만 처리
         clearTimeout(previewObserver._debounce);
-        previewObserver._debounce = setTimeout(processQueue, 500);
+        previewObserver._debounce = setTimeout(() => processQueue(false), 500);
     });
     previewObserver.observe(document.body, { childList: true, subtree: true });
     
-    console.log(`[CAT] 📁 채팅 미리보기 옵저버 등록 (번역+정리)`);
+    console.log(`[CAT] 📁 채팅 미리보기 옵저버 등록 (자동 + 수동 버튼)`);
 }
 
