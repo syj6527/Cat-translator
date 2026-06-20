@@ -1,5 +1,5 @@
 // ============================================================
-// 🐱 Translator v1.0.5 - ui.js
+// 🐱 Translator v1.0.4 - ui.js
 // ============================================================
 import { catNotify, catNotifyProgress, getThemeEmoji, getCompletionEmoji, getModelTheme, setTextareaValue } from './utils.js';
 import { getStats, clearAllCache, exportSettings, importSettings, getHistory, togglePin } from './cache.js';
@@ -82,22 +82,21 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                     <option value="strong" ${(settings.retranslateStrength === 'strong') ? 'selected' : ''}>강함 (완전히 다르게 강제)</option>
                 </select>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <div class="cat-setting-row" style="flex:1 1 200px; min-width:0; margin-bottom:0; box-sizing:border-box;">
-                    <label>수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(✏️ 동작)</span></label>
-                    <select id="ct-after-edit" class="text_pole" style="width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
-                        <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역</option>
-                        <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
-                        <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 유지</option>
-                    </select>
-                </div>
-                <div class="cat-setting-row" style="flex:1 1 200px; min-width:0; margin-bottom:0; box-sizing:border-box;">
-                    <label>한국어 수정 허용 <span style="font-size:0.8em; opacity:0.6;">(봇/유저)</span></label>
-                    <select id="ct-user-input-mode" class="text_pole" style="width:100%; min-width:0; max-width:100%; box-sizing:border-box;">
-                        <option value="english-only" ${(!settings.userInputMode || settings.userInputMode === 'english-only') ? 'selected' : ''}>영어 원문만 (기본)</option>
-                        <option value="bidirectional" ${settings.userInputMode === 'bidirectional' ? 'selected' : ''}>한-영병기</option>
-                    </select>
-                </div>
+            <div class="cat-setting-row">
+                <label>원문 수정 후 동작 <span style="font-size:0.8em; opacity:0.6;">(✏️ 연필로 영어 수정 시)</span></label>
+                <select id="ct-after-edit" class="text_pole">
+                    <option value="notify" ${(!settings.afterEditMode || settings.afterEditMode === 'notify') ? 'selected' : ''}>알림 + 재번역 버튼 (기본)</option>
+                    <option value="auto" ${settings.afterEditMode === 'auto' ? 'selected' : ''}>자동 재번역</option>
+                    <option value="keep" ${settings.afterEditMode === 'keep' ? 'selected' : ''}>기존 번역 유지</option>
+                </select>
+            </div>
+            <div class="cat-setting-row">
+                <label>📁 채팅 파일 관리 미리보기 번역 <span style="font-size:0.8em; opacity:0.6;">(채팅 기록의 마지막 메시지)</span></label>
+                <select id="ct-preview-translate" class="text_pole">
+                    <option value="off" ${(!settings.previewTranslate || settings.previewTranslate === 'off') ? 'selected' : ''}>OFF</option>
+                    <option value="cache" ${settings.previewTranslate === 'cache' ? 'selected' : ''}>캐시만 (이미 번역한 것만, 추가 호출 X)</option>
+                    <option value="auto" ${settings.previewTranslate === 'auto' ? 'selected' : ''}>자동 번역 (캐시 없으면 API 호출)</option>
+                </select>
             </div>
             <div class="cat-setting-row" style="display:none"><label>시스템 보호막 (🔒 고정)</label><textarea id="ct-shield" class="text_pole cat-readonly-area" rows="3" readonly>${SYSTEM_SHIELD}</textarea></div>
             <div class="cat-setting-row">
@@ -154,7 +153,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     };
     
     // 모든 설정 필드에 자동 저장 연결
-    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit, #ct-user-input-mode').on('change', autoSave);
+    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit, #ct-preview-translate').on('change', autoSave);
     $('#ct-key, #ct-model-custom, #ct-user-prompt, #ct-dictionary').on('input', autoSave);
     
     $('#ct-model').val(settings.directModel).on('change', function () {
@@ -336,9 +335,9 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
             if (msg.extra.swipe_translations) { delete msg.extra.swipe_translations; touched = true; }
             if (msg.extra.cat_swipe_id !== undefined) { delete msg.extra.cat_swipe_id; touched = true; }
             
-            // 🚨 v1.0.5: 한국어 위주 오염 검사 (영어+한국어 혼합은 정상으로 인식)
-            const mesIsKorean = msg.extra.original_mes && (window._catIsMostlyKorean||(()=>false))(msg.mes);
-            const origIsKorean = msg.extra.original_mes && (window._catIsMostlyKorean||(()=>false))(msg.extra.original_mes);
+            // 2. 한국어 오염 검사
+            const mesIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+            const origIsKorean = msg.extra.original_mes && /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
             
             if (origIsKorean) {
                 // 🚨 영어 원본 자체가 손실됨 - 복구 불가
@@ -387,7 +386,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
         $('#ct-model').val('gemini-2.5-flash'); $('#ct-model-custom').val('').hide();
-        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify'); $('#ct-user-input-mode').val('english-only');
+        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify'); $('#ct-preview-translate').val('off');
         $('#ct-temperature').val(0.3); $('#ct-max-tokens').val(8192); $('#ct-context-range').val(1);
         $('#ct-user-prompt').val(''); $('#ct-dictionary').val(''); $('#ct-dict-reset').text('📭');
         settings.promptPresets = {}; settings.charPresetMap = {}; $('#ct-prompt-preset').val('').find('option:not(:first)').remove();
@@ -424,7 +423,7 @@ export function collectSettings() {
         userPrompt: $('#ct-user-prompt').val() || '', dictionary: $('#ct-dictionary').val() || '',
         retranslateStrength: $('#ct-retranslate-strength').val() || 'normal',
         afterEditMode: $('#ct-after-edit').val() || 'notify',
-        userInputMode: $('#ct-user-input-mode').val() || 'english-only',
+        previewTranslate: $('#ct-preview-translate').val() || 'off',
         promptPresets: _settingsRef?.promptPresets || {}, charPresetMap: _settingsRef?.charPresetMap || {}
     };
 }
@@ -504,19 +503,8 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
         const msg = ctx?.chat?.[parseInt(msgId)];
         const hasTransData = msg?.extra?.original_mes || msg?.extra?.display_text;
         const editStyle = hasTransData ? 'opacity:0.8;' : 'opacity:0;pointer-events:none;';
-        // 🚨 v1.0.5: 히스토리 버튼 표시 여부
-        const hasHistory = Array.isArray(msg?.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0;
-        const historyStyle = hasHistory ? 'opacity:0.8;' : 'opacity:0;pointer-events:none;';
-        const group = $(`<div class="cat-btn-group"><span class="cat-mes-trans-btn interactable" title="번역" data-mesid="${msgId}"><span class="cat-emoji-icon">${emoji}</span></span><span class="cat-mes-revert-btn interactable" title="복구" data-mesid="${msgId}"><i class="fa-solid fa-rotate-left"></i></span><span class="cat-mes-edit-btn interactable" title="편집" data-mesid="${msgId}" style="${editStyle}"><span class="cat-emoji-icon">${editEmoji}</span></span><span class="cat-mes-history-btn interactable" title="수정 히스토리" data-mesid="${msgId}" style="${historyStyle}"><span class="cat-emoji-icon">🕓</span></span></div>`);
+        const group = $(`<div class="cat-btn-group"><span class="cat-mes-trans-btn interactable" title="번역" data-mesid="${msgId}"><span class="cat-emoji-icon">${emoji}</span></span><span class="cat-mes-revert-btn interactable" title="복구" data-mesid="${msgId}"><i class="fa-solid fa-rotate-left"></i></span><span class="cat-mes-edit-btn interactable" title="편집" data-mesid="${msgId}" style="${editStyle}"><span class="cat-emoji-icon">${editEmoji}</span></span></div>`);
         let target = $(this).find('.name_text'); if (target.length > 0) { target.append(group); } else { let sysWrap = $('<div style="text-align:right; margin-bottom:4px;"></div>'); sysWrap.append(group); $(this).find('.mes_text').first().prepend(sysWrap); }
-    });
-    // 🚨 v1.0.5: 기존 cat-btn-group에 🕓 버튼이 없으면 보강 (v1.0.4 → v1.0.5 업그레이드 케이스 대응)
-    $('.cat-btn-group:not(:has(.cat-mes-history-btn))').each(function () {
-        const $group = $(this);
-        const msgId = $group.closest('.mes').attr('mesid');
-        if (!msgId) return;
-        const $btn = $(`<span class="cat-mes-history-btn interactable" title="수정 히스토리" data-mesid="${msgId}" style="opacity:0;pointer-events:none;"><span class="cat-emoji-icon">🕓</span></span>`);
-        $group.append($btn);
     });
     // 🚨 이미 번역된 메시지의 편집 버튼 표시 복원 (인라인 스타일)
     if (ctx?.chat) {
@@ -527,12 +515,6 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
             if (msg?.extra?.original_mes || msg?.extra?.display_text) {
                 $(this).find('.cat-mes-edit-btn').css({ opacity: 0.8, 'pointer-events': 'auto' });
                 restoredCount++;
-            }
-            // 🚨 v1.0.5: 히스토리 버튼 표시 복원
-            if (Array.isArray(msg?.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0) {
-                $(this).find('.cat-mes-history-btn').css({ opacity: 0.8, 'pointer-events': 'auto' });
-            } else {
-                $(this).find('.cat-mes-history-btn').css({ opacity: 0, 'pointer-events': 'none' });
             }
         });
         if (restoredCount > 0) console.log(`[CAT] 🐟 편집 아이콘 복원: ${restoredCount}개 메시지`);
@@ -556,17 +538,6 @@ export function injectMessageButtons(processMessageFn, revertMessageFn) {
                 return;
             }
             enterTranslatedEdit(mesBlock, msg, msgId);
-        });
-    }
-    // 🚨 v1.0.5: 🕓 히스토리 버튼 클릭 — 별도 플래그로 분리 (v1.0.4 캐싱과 무관하게 등록 보장)
-    if (!window._catHistoryBtnDelegated) {
-        window._catHistoryBtnDelegated = true;
-        $(document).on('click', '.cat-mes-history-btn', function (e) {
-            e.stopPropagation();
-            const msgId = parseInt($(this).data('mesid') || $(this).closest('.mes').attr('mesid'));
-            if (!isNaN(msgId) && typeof showEditHistoryPopup === 'function') {
-                showEditHistoryPopup(msgId);
-            }
         });
     }
 }
@@ -911,206 +882,6 @@ function showRetranslatePrompt(msgId, processMessageFn) {
     setTimeout(() => toast.fadeOut(400, () => toast.remove()), 10000);
 }
 
-// 🚨 v1.0.5: index.js의 origIsKorean 자동 복구 분기에서 호출
-window._catShowRetranslatePrompt = (msgId) => {
-    const fn = window._catProcessMessageRef;
-    if (typeof fn === 'function') showRetranslatePrompt(msgId, fn);
-};
-
-// 🚨 v1.0.5: HTML 이스케이프 헬퍼
-function _catEscapeHtml(s) {
-    if (s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-// 🚨 v1.0.5: 수정 히스토리 팝업 (🕓 버튼 클릭 또는 손상 토스트의 [🕓 히스토리에서 복구])
-function showEditHistoryPopup(msgId) {
-    const ctx = SillyTavern?.getContext?.();
-    const msg = ctx?.chat?.[msgId];
-    if (!msg?.extra) {
-        catNotify(`${getThemeEmoji()} 메시지 데이터가 없어요.`, "warning");
-        return;
-    }
-    const history = Array.isArray(msg.extra.cat_edit_history) ? msg.extra.cat_edit_history : [];
-    const current = msg.extra.original_mes || '(없음)';
-    
-    $('.cat-edit-history-overlay').remove();
-    
-    const fmtTime = (ts) => {
-        const d = new Date(ts);
-        return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
-    };
-    const truncate = (s, n) => s.length > n ? s.substring(0, n) + '…' : s;
-    let historyHtml;
-    if (history.length === 0) {
-        historyHtml = `<div class="cat-edit-history-empty">아직 수정 히스토리가 없어요.<br><span style="font-size:0.85em; opacity:0.6;">원문을 ✏️로 수정하면 이전 버전이 여기 보관돼요. (최근 3개)</span></div>`;
-    } else {
-        // 최신부터 표시 (히스토리 배열은 오래된 것이 앞 → 뒤집어서 표시)
-        const reversed = history.map((entry, originalIdx) => ({ ...entry, originalIdx })).reverse();
-        historyHtml = reversed.map((entry, displayIdx) => {
-            const preview = truncate(entry.original, 2000);
-            return `
-                <div class="cat-edit-history-item">
-                    <div class="cat-edit-history-meta">#${reversed.length - displayIdx} · ${fmtTime(entry.timestamp)}</div>
-                    <div class="cat-edit-history-text">${_catEscapeHtml(preview)}</div>
-                    <button type="button" class="cat-edit-history-restore" data-index="${entry.originalIdx}" style="display:inline-block; width:auto; min-width:0; white-space:nowrap; word-break:keep-all; writing-mode:horizontal-tb; padding:6px 14px; cursor:pointer; background:var(--ca-bg,#444); border:1px solid var(--ca-accent,#888); color:var(--SmartThemeBodyColor,#fff); border-radius:6px; font-size:0.88em;">↩️ 이걸로 되돌리기</button>
-                </div>
-            `;
-        }).join('');
-    }
-    
-    const currentPreview = truncate(current, 2000);
-    
-    const popup = $(`
-        <div class="cat-edit-history-overlay" style="background:rgba(0,0,0,0.6);">
-            <div class="cat-edit-history-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px;">
-                <div class="cat-edit-history-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <h3 style="margin:0; font-size:1.1em;">🕓 수정 히스토리 #${msgId}</h3>
-                    <span class="cat-edit-history-close" style="cursor:pointer; font-size:1.4em; opacity:0.7; padding:0 6px;">✕</span>
-                </div>
-                <div class="cat-edit-history-current-wrap">
-                    <div class="cat-edit-history-meta">현재 원문 (활성)</div>
-                    <div class="cat-edit-history-text cat-edit-history-current">${_catEscapeHtml(currentPreview)}</div>
-                </div>
-                <hr style="border:none; border-top:1px solid rgba(255,255,255,0.1); margin:14px 0;">
-                <div class="cat-edit-history-list">${historyHtml}</div>
-            </div>
-        </div>
-    `);
-    
-    $('body').append(popup);
-    
-    const closePopup = () => {
-        popup.remove();
-        $(document).off('keydown.catedithistory');
-    };
-    
-    popup.find('.cat-edit-history-close').on('click touchend', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        closePopup();
-    });
-    // overlay (popup 자체 div) 클릭/터치하면 닫기 — popup 안 내용 클릭은 stopPropagation
-    popup.on('click touchend', function(e) {
-        if (e.target === this) {
-            e.preventDefault();
-            closePopup();
-        }
-    });
-    popup.find('.cat-edit-history-popup').on('click touchend', function(e) {
-        e.stopPropagation();
-    });
-    // ESC 키로 닫기
-    $(document).on('keydown.catedithistory', function(e) {
-        if (e.key === 'Escape') closePopup();
-    });
-    popup.find('.cat-edit-history-restore').on('click', function() {
-        const idx = parseInt($(this).attr('data-index'));
-        closePopup();
-        if (typeof window._catRestoreFromHistory === 'function') {
-            window._catRestoreFromHistory(msgId, idx);
-        } else {
-            catNotify(`${getThemeEmoji()} 복원 함수 연결 안 됨 (페이지 새로고침 필요).`, "warning");
-        }
-    });
-}
-
-// 🚨 v1.0.5: 손상된 원본 복구 토스트 (영어 후보가 captured/msg.mes에 없을 때)
-function showDamagedRecoveryToast(msgId) {
-    const ctx = SillyTavern?.getContext?.();
-    const msg = ctx?.chat?.[msgId];
-    if (!msg) return;
-    
-    const hasHistory = Array.isArray(msg.extra?.cat_edit_history) && msg.extra.cat_edit_history.length > 0;
-    
-    $('.cat-damaged-toast').remove();
-    
-    const historyBtn = hasHistory 
-        ? `<button class="cat-damaged-history menu_button" style="padding:4px 10px; margin:0;">🕓 히스토리에서 복구</button>` 
-        : '';
-    
-    const toast = $(`
-        <div class="cat-damaged-toast" style="position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:99999; background:var(--SmartThemeBlurTintColor,#333); color:var(--SmartThemeBodyColor,#fff); border:1px solid #d77; border-radius:10px; padding:10px 14px; box-shadow:0 4px 16px rgba(0,0,0,0.3); display:flex; align-items:center; gap:8px; max-width:92vw; flex-wrap:wrap;">
-            <span>⚠️ 영어 원본이 손상됐어요 #${msgId}</span>
-            <button class="cat-damaged-manual menu_button" style="padding:4px 10px; margin:0;">📝 영어 직접 입력</button>
-            ${historyBtn}
-            <span class="cat-damaged-close" style="cursor:pointer; opacity:0.6; padding:0 4px;">✕</span>
-        </div>
-    `);
-    $('body').append(toast);
-    toast.find('.cat-damaged-manual').on('click', () => {
-        toast.remove();
-        showManualOriginalPopup(msgId);
-    });
-    toast.find('.cat-damaged-history').on('click', () => {
-        toast.remove();
-        showEditHistoryPopup(msgId);
-    });
-    toast.find('.cat-damaged-close').on('click', () => toast.remove());
-    setTimeout(() => toast.fadeOut(500, () => toast.remove()), 20000);
-}
-
-window._catShowDamagedRecovery = showDamagedRecoveryToast;
-
-// 🚨 v1.0.5: 영어 원본 수동 입력 팝업 (옵션 B)
-function showManualOriginalPopup(msgId) {
-    $('.cat-manual-overlay').remove();
-    const popup = $(`
-        <div class="cat-manual-overlay" style="background:rgba(0,0,0,0.6);">
-            <div class="cat-manual-popup" style="background:var(--SmartThemeBlurTintColor,#222); color:var(--SmartThemeBodyColor,#eee); border:1px solid var(--ca-accent,#888); border-radius:12px; padding:16px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <h3 style="margin:0; font-size:1.05em;">📝 영어 원본 수동 입력 #${msgId}</h3>
-                    <span class="cat-manual-close" style="cursor:pointer; font-size:1.3em; opacity:0.7; padding:0 6px;">✕</span>
-                </div>
-                <div style="font-size:0.85em; opacity:0.7; margin-bottom:8px; line-height:1.5;">손상된 한국어를 대체할 <b>영어 원본</b>을 붙여넣어주세요. 등록 후 바로 재번역됩니다.</div>
-                <textarea class="cat-manual-textarea text_pole" rows="8" placeholder="Paste English original here…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-                <div style="display:flex; gap:8px; margin-top:10px; justify-content:flex-end;">
-                    <button class="cat-manual-cancel menu_button cat-btn-secondary">취소</button>
-                    <button class="cat-manual-submit menu_button">✓ 등록 + 재번역</button>
-                </div>
-            </div>
-        </div>
-    `);
-    $('body').append(popup);
-    
-    const closeManual = () => {
-        popup.remove();
-        $(document).off('keydown.catmanual');
-    };
-    
-    popup.find('.cat-manual-close, .cat-manual-cancel').on('click touchend', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeManual();
-    });
-    popup.on('click touchend', function(e) {
-        if (e.target === this) {
-            e.preventDefault();
-            closeManual();
-        }
-    });
-    popup.find('.cat-manual-popup').on('click touchend', function(e) {
-        e.stopPropagation();
-    });
-    $(document).on('keydown.catmanual', function(e) {
-        if (e.key === 'Escape') closeManual();
-    });
-    popup.find('.cat-manual-submit').on('click', () => {
-        const val = (popup.find('.cat-manual-textarea').val() || '').trim();
-        if (!val || val.length < 3) {
-            catNotify(`${getThemeEmoji()} 영어 원본을 입력해주세요.`, "warning");
-            return;
-        }
-        closeManual();
-        if (typeof window._catSetManualOriginal === 'function') {
-            window._catSetManualOriginal(msgId, val);
-        } else {
-            catNotify(`${getThemeEmoji()} 등록 함수 연결 안 됨 (페이지 새로고침 필요).`, "warning");
-        }
-    });
-    setTimeout(() => popup.find('.cat-manual-textarea').focus(), 100);
-}
-
 export function setupMutationObserver(processMessageFn, revertMessageFn, settings, stContext) {
     const chatContainer = document.getElementById('chat'); if (!chatContainer) { setTimeout(() => setupMutationObserver(processMessageFn, revertMessageFn, settings, stContext), 500); return; }
     const observer = new MutationObserver((mutations) => { let needsButtonInjection = false; for (const mutation of mutations) { if (mutation.addedNodes.length > 0) { needsButtonInjection = true; break; } } if (needsButtonInjection) { injectMessageButtons(processMessageFn, revertMessageFn); injectInputButtons(settings, stContext, processMessageFn); }
@@ -1133,35 +904,10 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 if (msg.extra?.display_text) mesBlock.data('cat-edit-display', msg.extra.display_text);
                 if (msg.extra?.original_mes) mesBlock.data('cat-edit-original', msg.extra.original_mes);
                 
-                // 🚨 v1.0.5: 유저 메시지의 경우 textarea에 원본 강제 삽입
-                // (인풋은 msg.mes가 번역문으로 덮어씌워져서 ✏️ 누르면 번역본이 뜨는 문제 해결)
-                // ST가 비동기로 textarea 값을 set하는 흐름 대응 — 3단계 시도
-                if (msg.is_user && msg.extra?.original_mes && !mesBlock.data('cat-edit-type')) {
-                    const targetOriginal = msg.extra.original_mes;
-                    const forceOriginal = () => {
-                        const $ta = mesBlock.find('textarea.edit_textarea:visible, textarea.mes_edit_textarea:visible').first();
-                        if ($ta.length === 0) return;
-                        if ($ta.val() !== targetOriginal) {
-                            setTextareaValue($ta[0], targetOriginal);
-                            const msgIdStr = String(msgId);
-                            window._catCapturedText = window._catCapturedText || new Map();
-                            window._catCapturedText.set(msgIdStr, targetOriginal);
-                        }
-                    };
-                    forceOriginal();
-                    setTimeout(forceOriginal, 50);
-                    setTimeout(() => {
-                        forceOriginal();
-                        const $ta = mesBlock.find('textarea').first();
-                        const success = $ta.length > 0 && $ta.val() === targetOriginal;
-                        console.log(`[CAT] 📝 유저 인풋 편집 #${msgId}: textarea → 영어 원본 (${success ? '✓' : '✗'})`);
-                    }, 250);
-                }
-                
                 // 🚨 textarea에 직접 input 리스너 바인딩 (글로벌 Map에 저장)
                 const msgIdStr = String(msgId);
                 window._catCapturedText = window._catCapturedText || new Map();
-                window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값 (강제 삽입 후 값)
+                window._catCapturedText.set(msgIdStr, editArea.val()); // 초기값
                 editArea.off('input.catedit keyup.catedit').on('input.catedit keyup.catedit', function() {
                     const val = $(this).val();
                     if (val) {
@@ -1181,6 +927,7 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                         }
                         const captured = window._catCapturedText.get(msgIdStr);
                         console.log(`[CAT] ✓ 직접 핸들러 #${msgIdStr} 캡처: ${captured ? captured.substring(0, 50) : '없음'}`);
+                        catNotify(`${getThemeEmoji ? getThemeEmoji() : '🐱'} 편집 저장 #${msgIdStr}`, "info");
                         // index.js의 handleEditSaved를 window에서 호출
                         setTimeout(() => {
                             if (typeof window._catHandleEditSaved === 'function') {
@@ -1201,9 +948,8 @@ export function setupMutationObserver(processMessageFn, revertMessageFn, setting
                 mesBlock.removeData('cat-edit-display').removeData('cat-edit-original');
                 
                 if (savedDisplay && savedOriginal) {
-                    // 🚨 v1.0.5: 한-영병기 모드면 한국어 차단 패스 (봇 메시지도 한국어 수정 허용)
-                    const allowKorean = (settings?.userInputMode || 'english-only') === 'bidirectional';
-                    const hasKorean = !msg.is_user && !allowKorean && (window._catIsMostlyKorean||(()=>false))(msg.mes);
+                    // msg.mes가 한국어로 오염되었으면 원문 복원만 (자동 재번역은 index.js handleEditSaved가 담당)
+                    const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
                     if (hasKorean) {
                         if (!msg.extra) msg.extra = {};
                         msg.extra.original_mes = savedOriginal;

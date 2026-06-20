@@ -1,5 +1,5 @@
 // ============================================================
-// 🐱 Translator v1.0.5
+// 🐱 Translator v1.0.4
 // ============================================================
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { catNotify, getThemeEmoji, getCompletionEmoji, setTextareaValue, getModelTheme, detectLanguageDirection, getCacheModelKey } from './utils.js';
@@ -10,17 +10,7 @@ import { setupSettingsPanel, collectSettings, updateCacheStats, injectMessageBut
 const EXT_NAME = "cat-translator";
 const stContext = getContext();
 
-// 🚨 v1.0.5: 한국어 위주 텍스트 판정 (영어+한국어 혼합 텍스트는 false 반환)
-// utils.js 의존성 없이 작동하도록 로컬 정의 + window 노출 (ui.js에서도 참조)
-function isMostlyKorean(text) {
-    if (!text || text.length < 10) return false;
-    const koreanCount = (text.match(/[가-힣]/g) || []).length;
-    const englishCount = (text.match(/[a-zA-Z]/g) || []).length;
-    return koreanCount > englishCount && koreanCount > 10;
-}
-window._catIsMostlyKorean = isMostlyKorean;
-
-const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', afterEditMode: 'notify', userInputMode: 'english-only', promptPresets: {}, charPresetMap: {} };
+const defaultSettings = { profile: '', customKey: '', vertexKey: '', vertexProject: '', vertexRegion: 'global', directModel: 'gemini-2.5-flash', customModelName: '', autoMode: 'none', bidirectional: 'off', dialogueBilingual: 'off', iconVisibility: 'all', targetLang: 'Korean', style: 'normal', temperature: 0.3, maxTokens: 8192, contextRange: 1, userPrompt: '', dictionary: '', retranslateStrength: 'normal', afterEditMode: 'notify', previewTranslate: 'off', promptPresets: {}, charPresetMap: {} };
 // 베타 → 정식 설정 마이그레이션 (기존 사용자 설정 보존)
 if (!extension_settings[EXT_NAME] && extension_settings["cat-translator-beta"]) {
     extension_settings[EXT_NAME] = { ...extension_settings["cat-translator-beta"] };
@@ -407,72 +397,22 @@ jQuery(async () => {
         const id = parseInt(typeof msgId === 'object' ? msgId.messageId : msgId);
         const msg = stContext.chat[id];
         if (!msg) return;
+        if (msg.is_user) return;
         if (msg.is_system === true || msg.extra?.media?.length > 0) return;
+        if (!msg.extra?.original_mes) return;
         
         const mode = settings.afterEditMode || 'notify';
         if (mode === 'keep') return;
         
-        // 🚨 v1.0.5: 유저 인풋 메시지 별도 처리 (original_mes 없어도 진입, 한국어/영어 방향 무관)
-        if (msg.is_user) {
-            handleUserEditSaved(id, msg, capturedText, mode);
-            return;
-        }
-        
-        // 봇 메시지는 original_mes 필수 (번역되지 않은 봇 메시지는 무시)
-        if (!msg.extra?.original_mes) return;
-        
-        // (이하는 봇 메시지 처리 — 기존 동작 유지)
         // 새 원문 결정: captured(영어 백업)가 있으면 우선, 없으면 msg.mes
         let newOriginal = msg.mes;
-        // 🚨 v1.0.5: 한-영병기 모드면 한국어 차단 모두 패스
-        const allowKorean = (settings.userInputMode || 'english-only') === 'bidirectional';
-        const capturedIsKorean = !allowKorean && capturedText && isMostlyKorean(capturedText);
-        const mesIsKorean = !allowKorean && isMostlyKorean(msg.mes);
-        const origIsKorean = !allowKorean && isMostlyKorean(msg.extra.original_mes);
+        const capturedIsKorean = capturedText && /[가-힣]/.test(capturedText) && capturedText.length > 10;
+        const mesIsKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+        const origIsKorean = /[가-힣]/.test(msg.extra.original_mes) && msg.extra.original_mes.length > 10;
         
         // 🚨 영어 원본 자체가 손상된 경우 (original_mes가 한국어)
         if (origIsKorean) {
-            // 🚨 v1.0.5 옵션 A: captured/msg.mes에 영어 후보가 있으면 자동 복구
-            const capturedIsEnglishCandidate = capturedText && capturedText.length > 10 && !capturedIsKorean;
-            const mesIsEnglishCandidate = msg.mes && msg.mes.length > 10 && !mesIsKorean;
-            
-            let recovered = null;
-            if (capturedIsEnglishCandidate) recovered = capturedText;
-            else if (mesIsEnglishCandidate) recovered = msg.mes;
-            
-            if (recovered) {
-                // 자동 복구 성공
-                msg.mes = recovered;
-                msg.extra.original_mes = recovered;
-                catNotify(`${getThemeEmoji()} 손상된 원문 자동 복구 → 재번역 진행`, "success");
-                // 자동 재번역 흐름으로 진입 (mode 무관하게 복구는 진행해야 함)
-                delete msg.extra.display_text;
-                if (msg.extra.swipe_translations && msg.swipe_id !== undefined) {
-                    delete msg.extra.swipe_translations[msg.swipe_id];
-                }
-                delete msg.extra.cat_swipe_id;
-                $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
-                stContext.updateMessageBlock(id, msg);
-                const modelKey = getCacheModelKey(settings);
-                const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
-                deleteCached(msg.mes, targetLang, modelKey);
-                if (mode === 'auto') {
-                    setTimeout(() => processMessage(id, false, null, false, false), 300);
-                } else {
-                    // notify 모드: 토스트 띄움 (사용자가 [재번역] 누르게)
-                    if (typeof window._catShowRetranslatePrompt === 'function') {
-                        window._catShowRetranslatePrompt(id);
-                    }
-                }
-                return;
-            }
-            
-            // 🚨 v1.0.5 옵션 B + 히스토리: 영어 후보 없음 → 풍부한 복구 토스트
-            if (typeof window._catShowDamagedRecovery === 'function') {
-                window._catShowDamagedRecovery(id);
-            } else {
-                catNotify(`${getThemeEmoji()} 이 메시지는 영어 원본이 손상됐어요. ST 🔄 재생성으로 복구하세요.`, "warning");
-            }
+            catNotify(`${getThemeEmoji()} 이 메시지는 영어 원본이 손상됐어요. ST 🔄 재생성으로 복구하세요.`, "warning");
             return;
         }
         
@@ -489,9 +429,6 @@ jQuery(async () => {
         if (newOriginal === msg.extra.original_mes) return;
         
         console.log(`[CAT] ✏️ 원문 갱신 #${id}: "${msg.extra.original_mes.substring(0,30)}..." → "${newOriginal.substring(0,30)}..."`);
-        
-        // 🚨 v1.0.5 히스토리: 이전 original_mes를 히스토리에 push (최대 3개, FIFO)
-        pushEditHistory(msg, msg.extra.original_mes);
         
         // 새 원문 적용
         msg.mes = newOriginal;
@@ -513,151 +450,6 @@ jQuery(async () => {
         }
     }
     
-    // 🚨 v1.0.5: 유저 인풋 메시지 수정 처리 (자동 재번역 + 히스토리, 손상 검사 없음)
-    function handleUserEditSaved(id, msg, capturedText, mode) {
-        // 새 원문: captured 우선, 없으면 msg.mes
-        const newOriginal = (capturedText && capturedText.length > 0) ? capturedText : msg.mes;
-        if (!newOriginal || newOriginal.length < 1) return;
-        // original_mes 없는 케이스도 진행 (자동 번역 안 된 유저 인풋도 ✏️ 수정 시 번역 시도)
-        const prevOriginal = msg.extra?.original_mes;
-        if (prevOriginal && newOriginal === prevOriginal) return;
-        
-        // 🚨 v1.0.5: userInputMode 검사 (english-only일 때 한국어 위주 인풋 스킵)
-        const userInputMode = settings.userInputMode || 'english-only';
-        if (userInputMode === 'english-only' && isMostlyKorean(newOriginal)) {
-            console.log(`[CAT] 🚫 유저 #${id}: 영어 전용 모드 — 한국어 위주 인풋 스킵`);
-            return;
-        }
-        
-        console.log(`[CAT] ✏️ 유저 인풋 원문 갱신 #${id}: "${(prevOriginal||'(없음)').substring(0,30)}..." → "${newOriginal.substring(0,30)}..."`);
-        
-        // 히스토리에 이전 원문 push (있을 때만, 모드 따라)
-        if (!msg.extra) msg.extra = {};
-        if (prevOriginal) {
-            pushEditHistory(msg, prevOriginal, userInputMode === 'bidirectional');
-        }
-        
-        // 새 원문 적용
-        msg.mes = newOriginal;
-        msg.extra.original_mes = newOriginal;
-        
-        if (mode === 'auto') {
-            delete msg.extra.display_text;
-            if (msg.extra.swipe_translations && msg.swipe_id !== undefined) {
-                delete msg.extra.swipe_translations[msg.swipe_id];
-            }
-            delete msg.extra.cat_swipe_id;
-            $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
-            stContext.updateMessageBlock(id, msg);
-            catNotify(`${getThemeEmoji()} 유저 원문 수정 → 자동 재번역 중...`, "info");
-            const modelKey = getCacheModelKey(settings);
-            const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
-            deleteCached(msg.mes, targetLang, modelKey);
-            // 유저 메시지는 isUser=true로 processMessage 호출
-            setTimeout(() => processMessage(id, true, null, false, true), 300);
-        } else {
-            // notify 모드: 토스트
-            if (typeof window._catShowRetranslatePrompt === 'function') {
-                // showRetranslatePrompt는 봇 기준이라 isUser 처리 위해 직접 처리
-                stContext.updateMessageBlock(id, msg);
-                catNotify(`${getThemeEmoji()} 유저 원문 수정 감지 (재번역 버튼 누르세요).`, "info");
-            }
-        }
-    }
-    
-    // 🚨 v1.0.5 히스토리 관리 함수들
-    function pushEditHistory(msg, previousOriginal, skipKoreanCheck = false) {
-        if (!msg.extra) msg.extra = {};
-        if (!Array.isArray(msg.extra.cat_edit_history)) msg.extra.cat_edit_history = [];
-        // 봇: 한국어 위주 손상본은 push 안 함 / 유저: 검사 패스 (한국어/영어 둘 다 정상)
-        if (!skipKoreanCheck && isMostlyKorean(previousOriginal)) return;
-        // 중복 방지 (가장 마지막 항목과 같으면 skip)
-        const lastEntry = msg.extra.cat_edit_history[msg.extra.cat_edit_history.length - 1];
-        if (lastEntry && lastEntry.original === previousOriginal) return;
-        msg.extra.cat_edit_history.push({ original: previousOriginal, timestamp: Date.now() });
-        // 3개 제한 (FIFO)
-        while (msg.extra.cat_edit_history.length > 3) msg.extra.cat_edit_history.shift();
-    }
-    
-    function restoreFromHistory(msgId, historyIndex) {
-        const id = parseInt(msgId);
-        const msg = stContext.chat[id];
-        if (!msg?.extra?.cat_edit_history) return;
-        const entry = msg.extra.cat_edit_history[historyIndex];
-        if (!entry) return;
-        const isUser = !!msg.is_user;
-        // 🚨 v1.0.5: 유저 + 영어전용 모드면 한국어 위주 항목으로 복원 차단
-        const userInputMode = settings.userInputMode || 'english-only';
-        if (isUser && userInputMode === 'english-only' && isMostlyKorean(entry.original)) {
-            catNotify(`${getThemeEmoji()} 영어 전용 모드: 한국어 위주 항목은 복원 불가.`, "warning");
-            return;
-        }
-        // 현재 original을 히스토리에 push (봇은 한국어 검사 / 유저 양방향 모드는 검사 패스)
-        const currentOriginal = msg.extra.original_mes;
-        const skipKoreanCheck = isUser && userInputMode === 'bidirectional';
-        // 선택한 히스토리 항목을 빼고, 나머지에 현재를 끝에 push
-        const newHistory = msg.extra.cat_edit_history.filter((_, i) => i !== historyIndex);
-        if (currentOriginal && (skipKoreanCheck || !isMostlyKorean(currentOriginal))) {
-            // 중복 방지
-            const lastEntry = newHistory[newHistory.length - 1];
-            if (!lastEntry || lastEntry.original !== currentOriginal) {
-                newHistory.push({ original: currentOriginal, timestamp: Date.now() });
-            }
-        }
-        while (newHistory.length > 3) newHistory.shift();
-        msg.extra.cat_edit_history = newHistory;
-        // 새 원문 적용 + 자동 재번역
-        msg.mes = entry.original;
-        msg.extra.original_mes = entry.original;
-        delete msg.extra.display_text;
-        if (msg.extra.swipe_translations && msg.swipe_id !== undefined) {
-            delete msg.extra.swipe_translations[msg.swipe_id];
-        }
-        delete msg.extra.cat_swipe_id;
-        $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
-        stContext.updateMessageBlock(id, msg);
-        catNotify(`${getThemeEmoji()} 히스토리에서 복원 → 재번역 중...`, "info");
-        const modelKey = getCacheModelKey(settings);
-        const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
-        deleteCached(msg.mes, targetLang, modelKey);
-        setTimeout(() => processMessage(id, isUser, null, false, isUser), 300);
-    }
-    
-    function setManualOriginal(msgId, englishText) {
-        const id = parseInt(msgId);
-        const msg = stContext.chat[id];
-        if (!msg?.extra) return;
-        if (!englishText || englishText.length < 3) {
-            catNotify(`${getThemeEmoji()} 원본 텍스트를 입력해주세요.`, "warning");
-            return;
-        }
-        // 한국어 위주 입력만 차단 (영어 안에 한국어 인용/단어 섞이는 건 허용)
-        if (isMostlyKorean(englishText)) {
-            catNotify(`${getThemeEmoji()} 한국어 위주로 보여요. 영어 원본을 입력해주세요.`, "warning");
-            return;
-        }
-        // 손상된 원본 자체는 push 안 함 (pushEditHistory가 한국어 차단)
-        msg.mes = englishText;
-        msg.extra.original_mes = englishText;
-        delete msg.extra.display_text;
-        if (msg.extra.swipe_translations && msg.swipe_id !== undefined) {
-            delete msg.extra.swipe_translations[msg.swipe_id];
-        }
-        delete msg.extra.cat_swipe_id;
-        $(`.mes[mesid="${id}"]`).removeAttr('data-cat-translated');
-        stContext.updateMessageBlock(id, msg);
-        catNotify(`${getThemeEmoji()} 영어 원본 등록 → 재번역 중...`, "info");
-        const modelKey = getCacheModelKey(settings);
-        const targetLang = detectLanguageDirection(msg.mes, settings).targetLang;
-        deleteCached(msg.mes, targetLang, modelKey);
-        setTimeout(() => processMessage(id, false, null, false, false), 300);
-    }
-    
-    // 🚨 ui.js에서 호출 가능하도록 노출
-    window._catRestoreFromHistory = restoreFromHistory;
-    window._catSetManualOriginal = setManualOriginal;
-    window._catProcessMessageRef = processMessage;
-    
     // 🚨 ui.js의 직접 핸들러에서 호출할 수 있도록 window에 노출
     window._catHandleEditSaved = handleEditSaved;
     
@@ -670,7 +462,7 @@ jQuery(async () => {
             if (ctx?.chat) {
                 let fixedCount = 0;
                 ctx.chat.forEach((msg, i) => {
-                    if (!msg.is_user && msg.extra?.original_mes && isMostlyKorean(msg.mes) && msg.mes !== msg.extra.original_mes) {
+                    if (!msg.is_user && msg.extra?.original_mes && /[가-힣]/.test(msg.mes) && msg.mes.length > 10 && msg.mes !== msg.extra.original_mes) {
                         msg.mes = msg.extra.original_mes;
                         fixedCount++;
                     }
@@ -725,7 +517,7 @@ jQuery(async () => {
             setSuppressAutoSave(false);
         }, 500);
     });
-    console.log('[CAT] 🐱 Translator v1.0.5 로드 완료!');
+    console.log('[CAT] 🐱 Translator v1.0.4 로드 완료!');
     
     // 🚨 페이지 가시성 변경 시 60초 이상 stuck 글로우 정리 (모바일 백그라운드 복귀 대응)
     document.addEventListener('visibilitychange', () => {
@@ -753,8 +545,8 @@ jQuery(async () => {
                 if (msg.mes === msg.extra.display_text && msg.mes !== msg.extra.original_mes) {
                     msg.mes = msg.extra.original_mes;
                     repaired++;
-                } else if (isMostlyKorean(msg.mes) && msg.mes !== msg.extra.original_mes && !isMostlyKorean(msg.extra.original_mes)) {
-                    // original_mes가 한국어 위주가 아닌데 msg.mes가 한국어 위주 → 오염
+                } else if (/[가-힣]{3,}/.test(msg.mes) && msg.mes !== msg.extra.original_mes && !/[가-힣]/.test(msg.extra.original_mes)) {
+                    // original_mes에 한국어가 없는데 msg.mes에 한국어가 있으면 오염
                     msg.mes = msg.extra.original_mes;
                     repaired++;
                 }
@@ -820,8 +612,9 @@ jQuery(async () => {
             if (msg.is_system === true || msg.extra?.media?.length > 0) return;
             if (!msg.extra?.original_mes) return;
             
-            // 🚨 v1.0.5: 한국어 위주 차단 (영어+한국어 혼합 통과)
-            if (isMostlyKorean(msg.mes)) return;
+            // 한국어 차단 (오염 방지)
+            const hasKorean = /[가-힣]/.test(msg.mes) && msg.mes.length > 10;
+            if (hasKorean) return;
             
             // 원문이 변경된 메시지 감지
             if (msg.mes === msg.extra.original_mes) {
@@ -861,5 +654,157 @@ jQuery(async () => {
     
     // 최초 로드 시 복구
     setTimeout(() => { repairContamination('init'); restoreSwipeTranslations('init'); }, 1500);
+    
+    // 🚨 채팅 파일 관리 미리보기 번역
+    setupChatPreviewTranslation();
 });
+
+// 🚨 채팅 파일 관리 팝업의 미리보기 메시지 번역
+function setupChatPreviewTranslation() {
+    const _previewProcessed = new WeakSet(); // 이미 처리한 DOM 노드
+    let _queueProcessing = false;
+    
+    // 후보 셀렉터들 (ST 버전마다 다를 수 있음)
+    const PREVIEW_SELECTORS = [
+        // ST 표준 채팅 파일 관리 셀렉터
+        '.select_chat_block_message',
+        '.select_chat_block_mes',
+        '.select_chat_block_mes_text',
+        '.select_chat_block .mes_text',
+        '.select_chat_block_chat_preview',
+        '.select_chat_block_filename + div',  // 파일명 다음 div (미리보기일 가능성)
+        // 광범위 매칭
+        '[class*="chat_preview"]',
+        '[class*="select_chat"] [class*="message"]',
+        '[class*="select_chat"] [class*="mes"]',
+        '#select_chat_div [class*="mes"]',
+        '#shadow_select_chat_popup [class*="mes"]',
+        '.last_mes_text',
+        '.preview_text'
+    ];
+    
+    // 영문 미리보기 텍스트인지 검사
+    function isEnglishPreview(text) {
+        if (!text || text.length < 20) return false;
+        // 한국어가 30% 이상이면 이미 번역됨
+        const korean = (text.match(/[가-힣]/g) || []).length;
+        if (korean / text.length > 0.3) return false;
+        // 영문이 50% 이상이어야 영문 미리보기
+        const english = (text.match(/[a-zA-Z]/g) || []).length;
+        return english / text.length > 0.5;
+    }
+    
+    // 미리보기 요소들 찾기
+    function findPreviewElements() {
+        const elements = [];
+        for (const selector of PREVIEW_SELECTORS) {
+            try {
+                document.querySelectorAll(selector).forEach(el => {
+                    if (_previewProcessed.has(el)) return;
+                    const text = el.textContent?.trim();
+                    if (isEnglishPreview(text)) {
+                        elements.push({ el, text });
+                    }
+                });
+            } catch (e) {}
+        }
+        return elements;
+    }
+    
+    // 미리보기 한 개 번역
+    async function translatePreview(el, text) {
+        if (_previewProcessed.has(el)) return;
+        _previewProcessed.add(el);
+        
+        const mode = settings.previewTranslate || 'off';
+        if (mode === 'off') return;
+        
+        const targetLang = settings.targetLang || 'Korean';
+        const modelKey = getCacheModelKey(settings);
+        
+        try {
+            // 1. 캐시 우선 조회
+            const { getCached } = await import('./cache.js');
+            const cached = await getCached(text, targetLang, modelKey);
+            
+            if (cached) {
+                // 캐시 히트 → 즉시 표시 (원본 텍스트는 data 속성에 보관)
+                if (!el.dataset.catOriginalPreview) {
+                    el.dataset.catOriginalPreview = text;
+                }
+                el.textContent = cached.translated;
+                el.style.opacity = '1';
+                el.title = `🐱 원문: ${text.substring(0, 100)}...`;
+                console.log(`[CAT] 📁 미리보기 캐시 히트`);
+                return;
+            }
+            
+            // 2. 캐시 없음 → mode 'auto'일 때만 API 호출
+            if (mode !== 'auto') return;
+            
+            // 시각적 피드백
+            el.style.opacity = '0.5';
+            el.style.fontStyle = 'italic';
+            
+            const { fetchTranslation } = await import('./translator.js');
+            const result = await fetchTranslation(text, settings, stContext, { 
+                forceLang: targetLang,
+                silent: true  // 미리보기는 알림 조용히
+            });
+            
+            if (result && result.text) {
+                if (!el.dataset.catOriginalPreview) {
+                    el.dataset.catOriginalPreview = text;
+                }
+                el.textContent = result.text;
+                el.style.opacity = '1';
+                el.style.fontStyle = 'normal';
+                el.title = `🐱 원문: ${text.substring(0, 100)}...`;
+                console.log(`[CAT] 📁 미리보기 번역 완료`);
+            } else {
+                el.style.opacity = '1';
+                el.style.fontStyle = 'normal';
+                _previewProcessed.delete(el); // 실패하면 다시 시도 가능
+            }
+        } catch (e) {
+            console.warn(`[CAT] 미리보기 번역 실패:`, e);
+            el.style.opacity = '1';
+            el.style.fontStyle = 'normal';
+            _previewProcessed.delete(el);
+        }
+    }
+    
+    // 큐에 쌓인 미리보기 순차 처리 (rate limit 방지)
+    async function processQueue() {
+        if (_queueProcessing) return;
+        if ((settings.previewTranslate || 'off') === 'off') return;
+        
+        _queueProcessing = true;
+        try {
+            const elements = findPreviewElements();
+            if (elements.length === 0) return;
+            
+            console.log(`[CAT] 📁 미리보기 ${elements.length}개 발견`);
+            
+            // 1초 간격으로 순차 처리 (API rate limit 방지)
+            for (const { el, text } of elements) {
+                await translatePreview(el, text);
+                await new Promise(r => setTimeout(r, 800)); // 0.8초 간격
+            }
+        } finally {
+            _queueProcessing = false;
+        }
+    }
+    
+    // MutationObserver: 채팅 팝업 등장 감지
+    const previewObserver = new MutationObserver(() => {
+        if ((settings.previewTranslate || 'off') === 'off') return;
+        // debounce - 500ms 후 한 번만 처리
+        clearTimeout(previewObserver._debounce);
+        previewObserver._debounce = setTimeout(processQueue, 500);
+    });
+    previewObserver.observe(document.body, { childList: true, subtree: true });
+    
+    console.log(`[CAT] 📁 채팅 미리보기 번역 옵저버 등록`);
+}
 
