@@ -91,14 +91,14 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
                 </select>
             </div>
             <div class="cat-setting-row">
-                <label>📁 채팅 파일 관리 미리보기 번역 <span style="font-size:0.8em; opacity:0.6;">(자동 옵저버, 캐시 우선 → API)</span></label>
-                <select id="ct-preview-translate" class="text_pole">
-                    <option value="off" ${(!settings.previewTranslate || settings.previewTranslate === 'off' || settings.previewTranslate === 'cache') ? 'selected' : ''}>OFF</option>
-                    <option value="on" ${(settings.previewTranslate === 'on' || settings.previewTranslate === 'auto') ? 'selected' : ''}>ON (자동 처리)</option>
-                </select>
+                <label>📁 채팅 파일 관리 미리보기 <span style="font-size:0.8em; opacity:0.6;">(채팅 기록 팝업에서 🐯 버튼 사용)</span></label>
+                <div style="font-size:0.85em; opacity:0.7; padding:5px 0; line-height:1.4;">
+                    💡 채팅 기록 팝업 열면 헤더에 <b>[🐯 번역]</b> 버튼, 각 채팅 옆에 <b>🐯</b>(영문)/<b>🐱</b>(한국어) 버튼 자동 표시. 
+                    처리 후 <b>🥩</b>/<b>🐟</b>로 변신 → 누르면 되돌리기.
+                </div>
             </div>
             <div class="cat-setting-row">
-                <label>🧹 미리보기 마크업 정리 <span style="font-size:0.8em; opacity:0.6;">(yaml/태그 숨김)</span></label>
+                <label>🧹 미리보기 마크업 정리 <span style="font-size:0.8em; opacity:0.6;">(yaml/태그 자동 숨김, 비용 0)</span></label>
                 <select id="ct-preview-cleanup" class="text_pole">
                     <option value="off" ${(!settings.previewCleanup || settings.previewCleanup === 'off') ? 'selected' : ''}>OFF</option>
                     <option value="on" ${settings.previewCleanup === 'on' ? 'selected' : ''}>ON</option>
@@ -159,7 +159,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
     };
     
     // 모든 설정 필드에 자동 저장 연결
-    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit, #ct-preview-translate, #ct-preview-cleanup').on('change', autoSave);
+    $('#ct-profile, #ct-auto-mode, #ct-bidirectional, #ct-dialogue-bilingual, #ct-lang, #ct-style, #ct-temperature, #ct-max-tokens, #ct-context-range, #ct-retranslate-strength, #ct-after-edit, #ct-preview-cleanup').on('change', autoSave);
     $('#ct-key, #ct-model-custom, #ct-user-prompt, #ct-dictionary').on('input', autoSave);
     
     $('#ct-model').val(settings.directModel).on('change', function () {
@@ -392,7 +392,7 @@ export function setupSettingsPanel(settings, stContext, saveSettingsFn) {
         if (!confirm('모든 설정을 초기값으로 되돌리시겠습니까?')) return;
         $('#ct-profile').val(''); $('#ct-key').val('');
         $('#ct-model').val('gemini-2.5-flash'); $('#ct-model-custom').val('').hide();
-        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify'); $('#ct-preview-translate').val('off'); $('#ct-preview-cleanup').val('off');
+        $('#ct-auto-mode').val('none'); $('#ct-bidirectional').val('off'); $('#ct-dialogue-bilingual').val('off'); $('#ct-icon-visibility').val('all'); $('#ct-lang').val('Korean'); $('#ct-style').val('normal'); $('#ct-retranslate-strength').val('normal'); $('#ct-after-edit').val('notify'); $('#ct-preview-cleanup').val('off');
         $('#ct-temperature').val(0.3); $('#ct-max-tokens').val(8192); $('#ct-context-range').val(1);
         $('#ct-user-prompt').val(''); $('#ct-dictionary').val(''); $('#ct-dict-reset').text('📭');
         settings.promptPresets = {}; settings.charPresetMap = {}; $('#ct-prompt-preset').val('').find('option:not(:first)').remove();
@@ -429,7 +429,7 @@ export function collectSettings() {
         userPrompt: $('#ct-user-prompt').val() || '', dictionary: $('#ct-dictionary').val() || '',
         retranslateStrength: $('#ct-retranslate-strength').val() || 'normal',
         afterEditMode: $('#ct-after-edit').val() || 'notify',
-        previewTranslate: $('#ct-preview-translate').val() || 'off',
+        previewTranslate: 'off',
         previewCleanup: $('#ct-preview-cleanup').val() || 'off',
         promptPresets: _settingsRef?.promptPresets || {}, charPresetMap: _settingsRef?.charPresetMap || {}
     };

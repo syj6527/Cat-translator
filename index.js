@@ -814,19 +814,20 @@ function setupChatPreviewTranslation() {
     
     // 큐에 쌓인 미리보기 순차 처리 (rate limit 방지)
     async function processQueue(force = false) {
+        // 🚨 무한 "이미 처리 중" 알림 방지: 조용히 return
         if (_queueProcessing) {
-            catNotify(`${getThemeEmoji()} 이미 처리 중이에요. 잠시 기다려주세요`, "info");
+            if (force) catNotify(`${getThemeEmoji()} 이미 처리 중이에요. 잠시 기다려주세요`, "info");
             return;
         }
         
         const translateMode = settings.previewTranslate || 'off';
         const cleanupMode = settings.previewCleanup || 'off';
         
-        // 강제 실행 모드: 옵션 OFF여도 정리는 무조건 실행
-        if (!force && translateMode === 'off' && cleanupMode === 'off') return;
+        // 자동 옵저버는 cleanup만 (force 모드에서만 번역 실행)
+        if (!force && cleanupMode === 'off') return;
         
         _queueProcessing = true;
-        _cancelRequested = false; // 중단 플래그 리셋
+        _cancelRequested = false;
         if (force) showCancelButton(true);
         let cleanupCount = 0;
         let translateCount = 0;
@@ -857,21 +858,15 @@ function setupChatPreviewTranslation() {
                 }
             }
             
-            // 번역 처리 (영문만)
-            // force 모드 시 옵션 무시하고 'on' 강제
-            let translateMode2 = translateMode;
-            if (translateMode2 === 'cache' || translateMode2 === 'auto') translateMode2 = 'on';
-            const effectiveTranslateMode = force ? 'on' : translateMode2;
-            if (effectiveTranslateMode !== 'off') {
+            // 🚨 번역은 force 모드(헤더 버튼 클릭)에서만 실행
+            // 자동 옵저버는 cleanup만 → 무한 루프 방지
+            if (force) {
                 const elements = findPreviewElements();
                 if (elements.length > 0) {
                     console.log(`[CAT] 📁 미리보기 ${elements.length}개 발견 (번역 대상)`);
                     
-                    // force 모드: 처음 알림
-                    if (force) {
-                        catNotify(`${getThemeEmoji()} 미리보기 ${elements.length}개 번역 시작`, "info");
-                        updateHeaderProgress(0, elements.length);
-                    }
+                    catNotify(`${getThemeEmoji()} 미리보기 ${elements.length}개 번역 시작`, "info");
+                    updateHeaderProgress(0, elements.length);
                     
                     // 1초 간격으로 순차 처리 (API rate limit 방지)
                     for (let i = 0; i < elements.length; i++) {
@@ -882,10 +877,10 @@ function setupChatPreviewTranslation() {
                         }
                         
                         const { el, text } = elements[i];
-                        const result = await translatePreview(el, text, effectiveTranslateMode, force);
+                        const result = await translatePreview(el, text, 'on', true);
                         if (result === 'translated' || result === 'cached') translateCount++;
                         
-                        if (force) updateHeaderProgress(i + 1, elements.length);
+                        updateHeaderProgress(i + 1, elements.length);
                         
                         await new Promise(r => setTimeout(r, 800)); // 0.8초 간격
                     }
@@ -1103,15 +1098,15 @@ function setupChatPreviewTranslation() {
         injectHeaderButton();
         injectItemButtons();
         
-        const translateMode = settings.previewTranslate || 'off';
+        // 🚨 자동 옵저버는 cleanup만 실행 (번역은 무한 루프 위험 → 수동만)
         const cleanupMode = settings.previewCleanup || 'off';
-        if (translateMode === 'off' && cleanupMode === 'off') return;
+        if (cleanupMode === 'off') return;
         // debounce - 500ms 후 한 번만 처리
         clearTimeout(previewObserver._debounce);
         previewObserver._debounce = setTimeout(() => processQueue(false), 500);
     });
     previewObserver.observe(document.body, { childList: true, subtree: true });
     
-    console.log(`[CAT] 📁 채팅 미리보기 옵저버 등록 (자동 + 수동 + 개별)`);
+    console.log(`[CAT] 📁 채팅 미리보기 옵저버 등록 (정리만 자동, 번역은 수동)`);
 }
 
