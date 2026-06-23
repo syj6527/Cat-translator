@@ -258,6 +258,33 @@ async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTran
                         sceneBoard.cat_original_text = sbOriginalText;
                     }
                     sceneBoard.text = sbResult.text;
+                    
+                    // 🚨 DOM 직접 업데이트: Scene Board 확장은 자체 DOM 요소 사용
+                    // 셀렉터: pre.sb-board-text (Scene Board 확장이 사용하는 요소)
+                    const mesEl = $(`.mes[mesid="${msgId}"]`);
+                    const sbDomCandidates = [
+                        'pre.sb-board-text',
+                        '.sb-board-text',
+                        '[class*="sceneBoard"] pre',
+                        '[class*="scene-board"] pre',
+                        '[class*="sb-board"]'
+                    ];
+                    let sbElement = null;
+                    for (const sel of sbDomCandidates) {
+                        const el = mesEl.find(sel).first();
+                        if (el.length > 0) { sbElement = el; break; }
+                    }
+                    if (sbElement && sbElement.length > 0) {
+                        // 원본 백업 (없으면)
+                        if (!sbElement.attr('data-cat-original')) {
+                            sbElement.attr('data-cat-original', sbElement.text());
+                        }
+                        sbElement.text(sbResult.text);
+                        console.log(`[CAT] 🎬 Scene Board DOM 업데이트 완료`);
+                    } else {
+                        console.warn(`[CAT] 🎬 Scene Board DOM 요소 못 찾음 (셀렉터 확인 필요)`);
+                    }
+                    
                     console.log(`[CAT] 🎬 Scene Board 번역 완료`);
                     if (!silent) catNotify(`${getThemeEmoji()} Scene Board 같이 번역됨`, "info");
                 }
@@ -364,6 +391,25 @@ function revertMessage(id) {
         msg.extra.sceneBoard.text = msg.extra.sceneBoard.cat_original_text;
         delete msg.extra.sceneBoard.cat_original_text;
         console.log(`[CAT] 🎬 Scene Board 원본 복원`);
+    }
+    
+    // 🚨 Scene Board DOM 복원
+    const mesElForRevert = $(`.mes[mesid="${msgId}"]`);
+    const sbRevertCandidates = [
+        'pre.sb-board-text',
+        '.sb-board-text',
+        '[class*="sceneBoard"] pre',
+        '[class*="scene-board"] pre',
+        '[class*="sb-board"]'
+    ];
+    for (const sel of sbRevertCandidates) {
+        const sbEl = mesElForRevert.find(sel).first();
+        if (sbEl.length > 0 && sbEl.attr('data-cat-original')) {
+            sbEl.text(sbEl.attr('data-cat-original'));
+            sbEl.removeAttr('data-cat-original');
+            console.log(`[CAT] 🎬 Scene Board DOM 복원 (${sel})`);
+            break;
+        }
     }
     
     $(`.mes[mesid="${msgId}"]`).removeAttr('data-cat-translated');
