@@ -241,6 +241,31 @@ async function doTranslateMessage(msgId, msg, textToTranslate, isInput, prevTran
         // 🚨 편집 버튼 표시 (번역 완료 → 🐟/🍖 활성화)
         $(`.mes[mesid="${msgId}"]`).find('.cat-mes-edit-btn').css({ opacity: 0.8, 'pointer-events': 'auto' });
 
+        // 🚨 Scene Board 확장 호환: msg.extra.sceneBoard.text도 같이 번역
+        if (msg.extra?.sceneBoard?.text && msg.extra.sceneBoard.text.trim().length > 10) {
+            try {
+                const sceneBoard = msg.extra.sceneBoard;
+                // 원본 결정: 백업이 있으면 그것, 없으면 현재 text
+                const sbOriginalText = sceneBoard.cat_original_text || sceneBoard.text;
+                console.log(`[CAT] 🎬 Scene Board 번역 시작 (${sbOriginalText.length}자)`);
+                const sbResult = await fetchTranslation(sbOriginalText, settings, stContext, { 
+                    forceLang, 
+                    silent: true 
+                });
+                if (sbResult && sbResult.text && sbResult.text.trim() && sbResult.text !== sbOriginalText) {
+                    // 첫 번역이면 백업 생성
+                    if (!sceneBoard.cat_original_text) {
+                        sceneBoard.cat_original_text = sbOriginalText;
+                    }
+                    sceneBoard.text = sbResult.text;
+                    console.log(`[CAT] 🎬 Scene Board 번역 완료`);
+                    if (!silent) catNotify(`${getThemeEmoji()} Scene Board 같이 번역됨`, "info");
+                }
+            } catch (e) {
+                console.warn(`[CAT] Scene Board 번역 실패:`, e);
+            }
+        }
+
         stContext.updateMessageBlock(msgId, msg);
         if (!silent) {
             const preview = result.text.substring(0, 25) + (result.text.length > 25 ? '...' : '');
@@ -333,6 +358,13 @@ function revertMessage(id) {
         delete msg.extra.original_mes;
     }
     if (msg.extra?.cat_swipe_id !== undefined) delete msg.extra.cat_swipe_id;
+    
+    // 🚨 Scene Board 확장 호환: sceneBoard.text도 복원
+    if (msg.extra?.sceneBoard?.cat_original_text) {
+        msg.extra.sceneBoard.text = msg.extra.sceneBoard.cat_original_text;
+        delete msg.extra.sceneBoard.cat_original_text;
+        console.log(`[CAT] 🎬 Scene Board 원본 복원`);
+    }
     
     $(`.mes[mesid="${msgId}"]`).removeAttr('data-cat-translated');
     

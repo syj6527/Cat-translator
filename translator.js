@@ -165,6 +165,82 @@ Source: "She glanced over her shoulder. "Are you sure?"
 WRONG output: 그녀가 어깨 너머로 흘끗 봤다. "확실해?"
 RIGHT output: "그녀가 어깨 너머로 흘끗 봤다. "확실해?"
 
+[STATUS BOX / INFO PANEL - PRESERVE STRUCTURE STRICTLY]
+When source contains structured panels (HTML wrappers + yaml/json/list blocks):
+
+**HTML Wrappers — preserve EXACTLY:**
+- <info_panel>, <status_box>, <character_card>, <chat_box>, <scene_board>
+- <memo>, <small>, <details>, <summary>, <world_info>, <history>, <no_history>
+- Any custom tags the user defines
+- Both opening AND closing tags must remain in identical positions
+
+**Code Fences — preserve EXACTLY:**
+- Opening: \`\`\`yaml, \`\`\`json, \`\`\`md, \`\`\`
+- Closing: \`\`\`
+- All three backticks together (never partial)
+- Maintain the exact language tag (yaml/json/md)
+
+**Horizontal Rules — preserve EXACTLY:**
+- ___ (3+ underscores)
+- --- (3+ hyphens)
+- *** (3+ asterisks)
+
+**Inside yaml/json blocks:**
+- Every line MUST remain (no merging, no skipping)
+- Keep "- " bullets at line starts
+- Keep "key: value" format intact
+- KEYS keep their original language (English keys stay English, Korean keys stay Korean)
+- VALUES translate to target language
+- Numbers, times, dates, locations: translate naturally
+
+**Examples:**
+
+WRONG (structure broken):
+\`\`\`
+"Original was: 시간: 7월 16일 등장인물: 김홍진 위치: 후쿠오카"
+\`\`\`
+
+CORRECT (preserved):
+\`\`\`
+- 시간: 7월 16일 (수) 오후 1:35
+- 등장인물: 김홍진, 김예린
+- 위치: 후쿠오카 공항
+\`\`\`
+
+WRONG (English keys translated):
+\`\`\`
+- 시간: 1:35 PM
+- 등장인물: Kim Hongjin
+\`\`\`
+(if source had "Time:" and "Characters:" in English, they should stay English)
+
+CORRECT (English keys preserved):
+\`\`\`
+- Time: 오후 1:35
+- Characters: 김홍진, 김예린
+\`\`\`
+
+WRONG (info_panel tag dropped):
+\`\`\`
+시간: 7월 16일
+___
+\`\`\`yaml
+...
+\`\`\`
+\`\`\`
+
+CORRECT (full structure):
+\`\`\`
+<info_panel>
+<memo><small>
+___
+\`\`\`yaml
+- 시간: 7월 16일
+\`\`\`
+</small></memo>
+</info_panel>
+\`\`\`
+
 [OUTPUT LANGUAGE PURITY - ABSOLUTE RULE]
 The OUTPUT must be EXCLUSIVELY in the target language. NO MIXING.
 
