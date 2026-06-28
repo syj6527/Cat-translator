@@ -456,14 +456,40 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
                     break; // 성공
                 } catch (profileErr) {
                     lastProfileErr = profileErr;
-                    _lastDebugLog.error = profileErr.message || 'API request failed';
-                    const errMsg = (profileErr.message || '').toLowerCase();
                     
-                    // 일부 에러는 재시도해도 의미 없음 → 즉시 던지기
-                    if (errMsg.includes('401') || errMsg.includes('unauthor') || 
+                    // 🚨 에러 객체 전체 분석 (ST가 던지는 에러는 message 외 다른 필드에 정보 있을 수 있음)
+                    const errorDetails = {
+                        message: profileErr.message || '',
+                        name: profileErr.name || '',
+                        status: profileErr.status ?? null,
+                        statusCode: profileErr.statusCode ?? null,
+                        code: profileErr.code ?? null,
+                        responseText: typeof profileErr.response === 'string' 
+                            ? profileErr.response.substring(0, 500) 
+                            : (profileErr.response ? JSON.stringify(profileErr.response).substring(0, 500) : null),
+                        cause: profileErr.cause ? String(profileErr.cause).substring(0, 200) : null
+                    };
+                    console.error('[CAT] 프로필 모드 에러 상세:', errorDetails);
+                    
+                    // 디버그 로그에 풀 상세 저장
+                    const detailsStr = Object.entries(errorDetails)
+                        .filter(([k, v]) => v !== null && v !== '')
+                        .map(([k, v]) => `${k}=${v}`)
+                        .join(' | ');
+                    _lastDebugLog.error = `${profileErr.message || 'API request failed'}\n[상세] ${detailsStr || '추가 정보 없음'}`;
+                    
+                    // 🚨 검사 대상 텍스트: message + status + 모든 속성 합쳐서
+                    const statusCode = errorDetails.status || errorDetails.statusCode || null;
+                    const errMsg = (profileErr.message || '').toLowerCase();
+                    const fullText = JSON.stringify(errorDetails).toLowerCase();
+                    
+                    // 일부 에러는 재시도해도 의미 없음 → 즉시 종료
+                    if (statusCode === 401 || statusCode === 403 || statusCode === 413 ||
+                        errMsg.includes('401') || errMsg.includes('unauthor') || 
                         errMsg.includes('403') || errMsg.includes('forbidden') ||
                         errMsg.includes('413') || errMsg.includes('too large') || errMsg.includes('too long') || errMsg.includes('context length') ||
-                        errMsg.includes('safety') || errMsg.includes('blocked') || errMsg.includes('filter')) {
+                        errMsg.includes('safety') || errMsg.includes('blocked') || errMsg.includes('filter') ||
+                        fullText.includes('"safety"') || fullText.includes('"blocked"')) {
                         break; // 재시도 안 함, 아래에서 분류 후 throw
                     }
                     
@@ -481,10 +507,10 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
                 const errMsg = (lastProfileErr.message || '').toLowerCase();
                 
                 if (errMsg.includes('빈 응답')) {
-                    throw new Error(`🤔 [thinking 토큰 부족] 3.5 Flash가 ${MAX_PROFILE_RETRIES}번 다 빈 응답. ST 프로필 설정에서: ⚙️ Max Response Length를 16384+로 / Reasoning Effort를 Minimum으로 변경 권장!`);
+                    throw new Error(`🤔 [리저닝 토큰 폭주] AI가 빈 응답만 줘요!\n🔧 해결: ST 우측 메뉴 ⚙️(AI Response Config) → Reasoning Effort를 'Minimum'으로 변경!\n(Low도 thinking이 응답 토큰 다 먹어버려요. Minimum 필수)`);
                 }
                 if (errMsg.includes('timeout') || errMsg.includes('aborted')) {
-                    throw new Error('⏱️ [프로필 타임아웃] 모델 응답 없음. 프로필 설정/모델 상태 확인');
+                    throw new Error('⏱️ [프로필 타임아웃] 모델 응답 없음. Reasoning Effort=Minimum 시도 권장');
                 }
                 if (errMsg.includes('401') || errMsg.includes('unauthor')) {
                     throw new Error('🔑 [프로필 인증 실패] 프로필 API 키가 만료/잘못됨');
@@ -505,8 +531,9 @@ export async function fetchTranslation(text, settings, stContext, options = {}) 
                     throw new Error('🛑 [안전 필터] 모델이 콘텐츠 거부. 모델 변경 또는 본문 수정 필요');
                 }
                 
-                // 기본 (분류 안 됨)
-                throw new Error(`❌ [프로필 모드 실패] ${(lastProfileErr.message || 'API request failed').substring(0, 120)}`);
+                // 🚨 기본 (분류 안 됨): API request failed 같은 generic 에러
+                // 3.5 Flash 사용자는 거의 99% 리저닝 문제이므로 그것부터 안내
+                throw new Error(`❌ [API 호출 실패] 가장 흔한 원인:\n🔧 ST 설정 → AI Response Config → Reasoning Effort를 'Minimum'으로 변경!\n(3.5 Flash는 Low조차 자주 실패해요. Minimum 권장)\n원본: ${(lastProfileErr.message || '').substring(0, 100)}`);
             }
         } else {
             // Vertex 모델 분기
